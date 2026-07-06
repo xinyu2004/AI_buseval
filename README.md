@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_zh.md)
+
 # busval — SoC Bandwidth Evaluation Tool
 
 Predict and measure whether DDR bandwidth is sufficient on multi-core heterogeneous SoCs, covering peripherals (CAN / SPI / MIPI / USB / ETH / FLASH) and internal pipelines (ISP / NPU / GPU / Display), and compare predicted vs. measured values.

@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_zh.md)
+
 # busval — SoC 带宽评估工具
 
 预测和测量多核异构 SoC 的 DDR 带宽是否足够，覆盖外设（CAN/SPI/MIPI/USB/ETH/FLASH）与内部 pipeline（ISP/NPU/GPU/Display），并比对预测值与实测值。
