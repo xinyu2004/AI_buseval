@@ -1,0 +1,78 @@
+VERSION ""
+NS_:
+
+BS_:
+
+BU_: default
+
+BO_ 100 EngineState: 8 Vector__XXX
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|8000] "rpm" Engine,Debug
+ SG_ EngineTemp : 16|16@1+ (0.1,-40) [-40|215] "degC" Engine,Debug
+ SG_ ThrottlePos : 32|8@1+ (0.4,0) [0|100] "%" Pedal,Debug
+ SG_ EngineLoad : 40|8@1+ (0.4,0) [0|100] "%" Engine,Debug
+
+BO_ 200 WheelSpeed: 8 Vector__XXX
+ SG_ FL_WheelSpeed : 0|16@1+ (0.01,0) [0|300] "km/h" Wheel,ESP
+ SG_ FR_WheelSpeed : 16|16@1+ (0.01,0) [0|300] "km/h" Wheel,ESP
+ SG_ RL_WheelSpeed : 32|16@1+ (0.01,0) [0|300] "km/h" Wheel,ESP
+ SG_ RR_WheelSpeed : 48|16@1+ (0.01,0) [0|300] "km/h" Wheel,ESP
+
+BO_ 300 BrakeStatus: 4 Vector__XXX
+ SG_ BrakeApplied : 0|1@1+ (1,0) [0|1] "" Brake,ESP
+ SG_ BrakePressure : 8|16@1+ (0.1,0) [0|30000] "kPa" Brake,ESP
+ SG_ ABS_Active : 24|1@1+ (1,0) [0|1] "" Brake,ESP
+
+BO_ 400 ThrottleCmd: 2 Vector__XXX
+ SG_ ThrottleCmd : 0|16@1+ (0.001,0) [0|100] "%" Pedal,EMS
+
+BO_ 500 GearState: 4 Vector__XXX
+ SG_ GearIdx : 0|4@1+ (1,0) [0|15] "" Gearbox,TCM
+ SG_ GearMode : 4|4@1+ (1,0) [0|15] "" Gearbox,TCM
+ SG_ GearFault : 8|1@1+ (1,0) [0|1] "" Gearbox,TCM
+
+BO_ 600 SteeringAngle: 4 Vector__XXX
+ SG_ SteeringAngle : 0|16@1- (0.1,0) [-720|720] "deg" Steering,EPS
+ SG_ SteeringRate : 16|16@1- (0.1,0) [-3276|3276] "deg/s" Steering,EPS
+
+BO_ 700 BodyState: 8 Vector__XXX
+ SG_ DoorFL : 0|1@1+ (1,0) [0|1] "" Body,BCM
+ SG_ DoorFR : 1|1@1+ (1,0) [0|1] "" Body,BCM
+ SG_ DoorRL : 2|1@1+ (1,0) [0|1] "" Body,BCM
+ SG_ DoorRR : 3|1@1+ (1,0) [0|1] "" Body,BCM
+ SG_ HeadLight : 8|2@1+ (1,0) [0|3] "" Body,BCM
+ SG_ TurnSignal : 16|2@1+ (1,0) [0|3] "" Body,BCM
+ SG_ WiperFront : 24|2@1+ (1,0) [0|3] "" Body,BCM
+
+BO_ 800 VehicleDynamics: 8 Vector__XXX
+ SG_ YawRate : 0|16@1- (0.01,0) [-327|327] "deg/s" Dynamics,ESP
+ SG_ LatAccel : 16|16@1- (0.01,0) [-327|327] "m/s2" Dynamics,ESP
+ SG_ LongAccel : 32|16@1- (0.01,0) [-327|327] "m/s2" Dynamics,ESP
+ SG_ SlipAngle : 48|16@1- (0.01,0) [-327|327] "deg" Dynamics,ESP
+
+BO_ 900 BatteryStatus: 4 Vector__XXX
+ SG_ BatteryVoltage : 0|16@1+ (0.1,0) [0|24] "V" Power,BCM
+ SG_ BatteryCurrent : 16|16@1- (0.1,0) [-3276|3276] "A" Power,BCM
+
+BO_ 1000 TirePressure: 8 Vector__XXX
+ SG_ FL_Pressure : 0|16@1+ (0.01,0) [0|800] "kPa" Tire,TPMS
+ SG_ FR_Pressure : 16|16@1+ (0.01,0) [0|800] "kPa" Tire,TPMS
+ SG_ RL_Pressure : 32|16@1+ (0.01,0) [0|800] "kPa" Tire,TPMS
+ SG_ RR_Pressure : 48|16@1+ (0.01,0) [0|800] "kPa" Tire,TPMS
+
+CM_ BU_ default "Default CAN bus for sample.dbc";
+
+BA_DEF_ "BusType" STRING;
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_ BO_ "GenMsgSendType" ENUM "Cyclic","Event","NoMsgSendType";
+
+BA_ "BusType" "CAN";
+BA_ "GenMsgCycleTime" BO_ 100 100;
+BA_ "GenMsgCycleTime" BO_ 200 20;
+BA_ "GenMsgCycleTime" BO_ 300 50;
+BA_ "GenMsgCycleTime" BO_ 400 100;
+BA_ "GenMsgCycleTime" BO_ 500 50;
+BA_ "GenMsgCycleTime" BO_ 600 10;
+BA_ "GenMsgCycleTime" BO_ 700 20;
+BA_ "GenMsgCycleTime" BO_ 800 20;
+BA_ "GenMsgCycleTime" BO_ 900 1000;
+BA_ "GenMsgCycleTime" BO_ 1000 1000;

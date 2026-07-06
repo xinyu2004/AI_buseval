@@ -1,0 +1,69 @@
+# Tunable estimation coefficients. Edit this file to calibrate without code changes.
+# All values are industry-typical defaults; verify against your chip datasheet.
+
+# CAN
+can:
+  frame_overhead_factor: 1.3      # SOF + arbitration + CRC + ACK + IFS overhead
+  payload_efficiency: 0.7         # effective payload fraction for load-based mode
+  default_bitrate_kbps: 500
+
+# SPI
+spi:
+  default_clock_mhz: 50
+
+# MIPI
+mipi:
+  lane_capacity_gbps: 1.5         # per-lane PHY capacity (CSI-2 D-PHY typical)
+  dsi_lane_capacity_gbps: 1.5
+
+# USB
+usb:
+  nominal_mbps:
+    "2": 480
+    "3": 5000
+    "3.2": 10000
+  protocol_efficiency: 0.9
+
+# ETH
+eth:
+  frame_overhead_bytes: 38        # preamble + IFG + header + FDR
+
+# FLASH
+flash:
+  random_penalty: 0.3             # random access throughput vs sequential
+  default_util_pct: 0.3
+
+# ISP
+isp:
+  in_format_bpp:
+    raw8: 8
+    raw10: 10
+    raw12: 12
+    raw14: 14
+    raw16: 16
+    yuv422: 16
+    rgb888: 24
+  typical_stage_factor_max: 2.0   # factors above 2x are flagged as non-typical
+
+# NPU
+npu:
+  activation_read_write_factor: 2  # activation read once, written once
+  tops_safety_limit_pct: 0.95
+
+# GPU
+gpu:
+  default_overdraw: 3
+
+# Display
+display:
+  default_bpp: 32
+
+# DDR
+ddr:
+  default_efficiency: 0.7
+
+# Alerts
+alerts:
+  aggressive_util_pct: 0.9
+  aggressive_can_load_pct: 0.7
+  ddr_near_full_pct: 0.8

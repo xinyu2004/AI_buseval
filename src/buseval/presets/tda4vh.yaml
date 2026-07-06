@@ -1,0 +1,38 @@
+# TI TDA4VH (Jacinto 7) — SoC preset. All values are public-spec estimates; verify before use.
+masters:
+  - {name: CAN0, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
+  - {name: CAN1, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
+  - {name: CAN2, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
+  - {name: CAN3, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
+  - {name: CSI0, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}
+  - {name: CSI1, type: mipi_csi, verify: true, params: {width: 1280, height: 720, fps: 60, bpp: 12, lanes: 2}}
+  - {name: USB0, type: usb, verify: true, params: {version: "3", util_pct: 0.3}}
+  - {name: ETH0, type: eth, verify: true, params: {link_gbps: 1, util_pct: 0.3, mtu: 1500}}
+  - {name: OSPI0, type: spi, verify: true, params: {clock_mhz: 166, xfer_bytes: 512, xfer_hz: 50000}}
+  - {name: UFS0, type: flash, verify: true, params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1200, util_pct: 0.2, random_ratio: 0.2}}
+pipelines:
+  - name: ISP0
+    type: isp
+    mode: serial
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
+    stages:
+      - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
+      - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
+  - name: NPU0
+    type: npu
+    mode: parallel
+    verify: true
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8, tops_used: 6}
+  - name: GPU0
+    type: gpu
+    verify: true
+    params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
+  - name: DISP0
+    type: display
+    verify: true
+    params: {width: 1920, height: 1080, fps: 60, bpp: 32}
+ddr_channels:
+  - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # LPDDR4 4266, 32-bit
+alert_thresholds: {yellow: 0.6, red: 0.8}

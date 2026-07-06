@@ -29,11 +29,11 @@
 ## 快速开始
 
 ```bash
-pip install buseval
+pip install -e .
 
 # 1. 看样例（零配置）
 buseval predict --soc rk3588
-buseval predict --dbc examples/sample.dbc
+buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 
 # 2. DBC + 预设联动（完整评估）
 buseval predict --soc tda4vh --dbc examples/sample.dbc

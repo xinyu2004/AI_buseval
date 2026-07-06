@@ -1,0 +1,105 @@
+# Full-menu topology template.
+# Copy this file, change `enabled: true` for what your system has, and
+# fill in your own params. Items marked `verify: true` will be flagged
+# in the assumptions audit until you confirm them.
+
+masters:
+  - name: CAN0
+    type: can               # load-based mode (no DBC)
+    enabled: false
+    verify: true
+    params: {bitrate_mbps: 0.5, load_pct: 0.3}
+    # hint: if you have a DBC, switch type to "can_dbc" and set params.dbc_path
+
+  - name: CAN1
+    type: can
+    enabled: false
+    verify: true
+    params: {bitrate_mbps: 0.5, load_pct: 0.3}
+
+  - name: SPI_FLASH0
+    type: spi
+    enabled: false
+    verify: true
+    params: {clock_mhz: 50, xfer_bytes: 4096, xfer_hz: 10000}
+    # hint: clock_mhz is the SPI bus clock; xfer_bytes×xfer_hz is the demand
+
+  - name: CSI0
+    type: mipi_csi
+    enabled: false
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}
+
+  - name: CSI1
+    type: mipi_csi
+    enabled: false
+    verify: true
+    params: {width: 1280, height: 720, fps: 60, bpp: 12, lanes: 2}
+
+  - name: DSI0
+    type: mipi_dsi
+    enabled: false
+    verify: true
+    params: {width: 1920, height: 1080, fps: 60, bpp: 24, lanes: 4}
+
+  - name: USB0
+    type: usb
+    enabled: false
+    verify: true
+    params: {version: "3", util_pct: 0.5}
+    # version: "2" | "3" | "3.2"
+
+  - name: ETH0
+    type: eth
+    enabled: false
+    verify: true
+    params: {link_gbps: 1, util_pct: 0.4, mtu: 1500}
+
+  - name: FLASH0
+    type: flash
+    enabled: false
+    verify: true
+    params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1200, util_pct: 0.3, random_ratio: 0.2}
+    # type: nand | emmc | ufs
+
+pipelines:
+  - name: ISP0
+    type: isp
+    mode: serial            # serial: take max of stages; parallel: sum
+    enabled: false
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
+    stages:
+      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
+      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
+    # read_factor/write_factor are multiples of the frame stream (w*h*fps*bpp/8)
+
+  - name: NPU0
+    type: npu
+    mode: parallel
+    enabled: false
+    verify: true
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8, tops_used: 6}
+
+  - name: GPU0
+    type: gpu
+    enabled: false
+    verify: true
+    params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
+
+  - name: DISP0
+    type: display
+    enabled: false
+    verify: true
+    params: {width: 1920, height: 1080, fps: 60, bpp: 32}
+
+ddr_channels:
+  - name: DDR0
+    theoretical_peak_mbps: 25600   # e.g. LPDDR4 4266 × 32-bit / 8
+    efficiency: 0.7                # usable fraction after refresh / row miss / etc.
+    read_write_ratio: null         # null = symmetric (0.5/0.5)
+
+alert_thresholds:
+  yellow: 0.6
+  red: 0.8

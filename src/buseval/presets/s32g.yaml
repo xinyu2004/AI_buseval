@@ -1,0 +1,28 @@
+# NXP S32G — SoC preset (vehicle gateway / domain controller). Public-spec estimates; verify.
+masters:
+  - {name: CAN0, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN1, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN2, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN3, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN4, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN5, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.5}}
+  - {name: CAN6, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN7, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: ETH0, type: eth, verify: true, params: {link_gbps: 1, util_pct: 0.4, mtu: 1500}}
+  - {name: ETH1, type: eth, verify: true, params: {link_gbps: 1, util_pct: 0.4, mtu: 1500}}
+  - {name: ETH2, type: eth, verify: true, params: {link_gbps: 2.5, util_pct: 0.3, mtu: 1500}}
+  - {name: ETH3, type: eth, verify: true, params: {link_gbps: 2.5, util_pct: 0.3, mtu: 1500}}
+  - {name: USB0, type: usb, verify: true, params: {version: "3", util_pct: 0.2}}
+  - {name: EMMC0, type: flash, verify: true, params: {type: emmc, seq_read_mbps: 400, seq_write_mbps: 200, util_pct: 0.2, random_ratio: 0.5}}
+pipelines:
+  - name: GPU0
+    type: gpu
+    verify: true
+    params: {width: 1280, height: 720, fps: 30, bpp: 32, overdraw: 2}
+  - name: DISP0
+    type: display
+    verify: true
+    params: {width: 1280, height: 720, fps: 30, bpp: 32}
+ddr_channels:
+  - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # DDR4 3200, 32-bit
+alert_thresholds: {yellow: 0.6, red: 0.8}

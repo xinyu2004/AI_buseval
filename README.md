@@ -29,11 +29,11 @@ Only the **early prediction** loop is delivered. No collection or comparison yet
 ## Quick Start
 
 ```bash
-pip install buseval
+pip install -e .
 
 # 1. Try a sample (zero config)
 buseval predict --soc rk3588
-buseval predict --dbc examples/sample.dbc
+buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 
 # 2. DBC + preset combined (full evaluation)
 buseval predict --soc tda4vh --dbc examples/sample.dbc
