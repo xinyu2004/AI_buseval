@@ -1,0 +1,79 @@
+VERSION ""
+
+NS_:
+
+BS_:
+
+BU_: default
+
+BO_ 100 RadarPointCloud_Front: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Radar
+
+BO_ 110 RadarPointCloud_Rear: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Radar
+
+BO_ 120 LidarPointBatch0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Lidar
+
+BO_ 121 LidarPointBatch1: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Lidar
+
+BO_ 130 CameraFrameChunk0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Camera
+
+BO_ 131 CameraFrameChunk1: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Camera
+
+BO_ 140 DiagnosticBlock0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Diag
+
+BO_ 141 DiagnosticBlock1: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Diag
+
+BO_ 150 OTAPayload0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" OTA
+
+BO_ 151 OTAPayload1: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" OTA
+
+BO_ 160 TelemetryBulk0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Telemetry
+
+BO_ 170 ObjectList_Front: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Perception
+
+BO_ 180 LaneBoundaries: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Perception
+
+BO_ 190 CalibrationBlock0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Calib
+
+BO_ 191 CalibrationBlock1: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Calib
+
+BO_ 200 LogStream0: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" Logger
+
+BO_ 210 GNSS_RawMeasure: 64 Vector__XXX
+ SG_ Payload : 0|512@1+ (1,0) [0|0] "" GNSS
+
+CM_ BU_ default "Heavy CAN-FD bus: radar/lidar/camera/diag/OTA/perception streams, 64-byte frames";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_ "GenMsgCycleTime" BO_ 100 10;
+BA_ "GenMsgCycleTime" BO_ 110 10;
+BA_ "GenMsgCycleTime" BO_ 120 5;
+BA_ "GenMsgCycleTime" BO_ 121 5;
+BA_ "GenMsgCycleTime" BO_ 130 20;
+BA_ "GenMsgCycleTime" BO_ 131 20;
+BA_ "GenMsgCycleTime" BO_ 140 100;
+BA_ "GenMsgCycleTime" BO_ 141 100;
+BA_ "GenMsgCycleTime" BO_ 150 20;
+BA_ "GenMsgCycleTime" BO_ 151 20;
+BA_ "GenMsgCycleTime" BO_ 160 50;
+BA_ "GenMsgCycleTime" BO_ 170 20;
+BA_ "GenMsgCycleTime" BO_ 180 50;
+BA_ "GenMsgCycleTime" BO_ 190 200;
+BA_ "GenMsgCycleTime" BO_ 191 200;
+BA_ "GenMsgCycleTime" BO_ 200 10;
+BA_ "GenMsgCycleTime" BO_ 210 20;

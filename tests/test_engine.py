@@ -107,3 +107,64 @@ def test_cli_lint(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "no-output" in out or "OK" in out
+
+
+def test_cli_predict_can_dbc_multi_slot(capsys):
+    rc = cli_main([
+        "predict", "--soc", "tda4vh",
+        "--can-dbc", f"CAN0={EXAMPLES / 'sample.dbc'}",
+        "--can-dbc", f"CAN2={EXAMPLES / 'sample_heavy.dbc'}",
+        "--format", "json",
+    ])
+    assert rc in (0, 3)
+    out = capsys.readouterr().out
+    assert "can_dbc" in out
+    # both DBCs injected
+    import json
+    d = json.loads(out)
+    can0 = next(i for i in d["items"] if i["name"] == "CAN0")
+    can2 = next(i for i in d["items"] if i["name"] == "CAN2")
+    assert can0["type"] == "can_dbc"
+    assert can2["type"] == "can_dbc"
+    # heavy DBC (17 msgs) should produce more bandwidth than light (10 msgs)
+    assert (can2["read_bw_mbps"] + can2["write_bw_mbps"]) > (can0["read_bw_mbps"] + can0["write_bw_mbps"])
+
+
+def test_cli_can_dbc_unknown_name_errors(capsys):
+    rc = cli_main(["predict", "--soc", "tda4vh", "--can-dbc", "CAN9=x.dbc"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "not found" in err
+
+
+def test_cli_can_dbc_non_can_target_errors(capsys):
+    rc = cli_main(["predict", "--soc", "tda4vh", "--can-dbc", f"CSI0={EXAMPLES / 'sample.dbc'}"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "not a CAN master" in err
+
+
+def test_cli_can_dbc_bad_format_errors(capsys):
+    rc = cli_main(["predict", "--soc", "tda4vh", "--can-dbc", "CAN0"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "NAME=PATH" in err
+
+
+def test_cli_can_dbc_and_dbc_mutually_exclusive(capsys):
+    rc = cli_main([
+        "predict", "--soc", "tda4vh",
+        "--dbc", str(EXAMPLES / "sample.dbc"),
+        "--can-dbc", f"CAN0={EXAMPLES / 'sample.dbc'}",
+    ])
+    assert rc != 0
+
+
+def test_sample_heavy_dbc_loads():
+    from buseval.dbc.health_report import build_health_report
+    report = build_health_report(str(EXAMPLES / "sample_heavy.dbc"), bitrate_kbps=2000)
+    assert len(report.buses) >= 1
+    bus = report.buses[0]
+    # 17 messages, 64-byte frames, total ~548 kbps on 2Mbps = ~27% load
+    assert bus.load_pct > 0.1
+    assert len(bus.top_messages) > 0

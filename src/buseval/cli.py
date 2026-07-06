@@ -23,43 +23,88 @@ def _list_presets() -> list[str]:
     return sorted(p.stem for p in PRESETS_DIR.glob("*.yaml"))
 
 
-def _load_soc(name: str, dbc_path: str | None):
+def _load_soc(name: str, dbc_path: str | None, can_dbc_mappings: list[tuple[str, str]] | None):
     p = PRESETS_DIR / f"{name}.yaml"
     if not p.exists():
         raise SystemExit(
             f"Unknown SoC preset '{name}'. Available: {', '.join(_list_presets())}"
         )
     topo = load_topology(p)
-    if dbc_path:
-        _inject_dbc(topo, dbc_path)
+    _apply_dbcs(topo, dbc_path, can_dbc_mappings)
     return topo
 
 
-def _inject_dbc(topology, dbc_path: str):
-    """Replace the first CAN master with a can_dbc estimator pointing at dbc_path."""
+def _apply_dbcs(topology, dbc_path: str | None, can_dbc_mappings: list[tuple[str, str]] | None):
+    """Inject DBC(s) into the topology.
+
+    - dbc_path (legacy --dbc): replace the first enabled CAN master.
+    - can_dbc_mappings (--can-dbc NAME=PATH): replace each named CAN master.
+    """
+    if dbc_path and can_dbc_mappings:
+        raise SystemExit("Use either --dbc or --can-dbc, not both.")
+    if dbc_path:
+        _inject_first_can(topology, dbc_path)
+    elif can_dbc_mappings:
+        _inject_named_cans(topology, can_dbc_mappings)
+
+
+def _inject_first_can(topology, dbc_path: str):
+    """Replace the first enabled CAN master with a can_dbc estimator."""
     from .schema import Master
 
     for i, m in enumerate(topology.masters):
         if m.type == "can" and m.enabled:
-            topo_master = Master(
-                name=m.name,
-                type="can_dbc",
-                enabled=True,
-                params={"dbc_path": dbc_path, "direction": "both"},
-                verify=True,
-            )
-            topology.masters[i] = topo_master
+            topology.masters[i] = _make_dbc_master(m.name, dbc_path)
             return
-    # No CAN slot found — append
-    topology.masters.append(
-        Master(
-            name="CAN_DBC",
-            type="can_dbc",
-            enabled=True,
-            params={"dbc_path": dbc_path, "direction": "both"},
-            verify=True,
-        )
+    topology.masters.append(_make_dbc_master("CAN_DBC", dbc_path))
+
+
+def _inject_named_cans(topology, mappings: list[tuple[str, str]]):
+    """Replace each named CAN master with a can_dbc estimator."""
+    from .schema import Master
+
+    by_name = {m.name: (i, m) for i, m in enumerate(topology.masters)}
+    for name, dbc_path in mappings:
+        if name not in by_name:
+            raise SystemExit(
+                f"--can-dbc: CAN master '{name}' not found in topology. "
+                f"Available: {', '.join(by_name) or '(none)'}"
+            )
+        i, m = by_name[name]
+        if not m.type.startswith("can"):
+            raise SystemExit(
+                f"--can-dbc: target '{name}' is type '{m.type}', not a CAN master."
+            )
+        topology.masters[i] = _make_dbc_master(name, dbc_path, keep_enabled=m.enabled)
+
+
+def _make_dbc_master(name: str, dbc_path: str, keep_enabled: bool = True):
+    from .schema import Master
+
+    return Master(
+        name=name,
+        type="can_dbc",
+        enabled=keep_enabled,
+        params={"dbc_path": dbc_path, "direction": "both"},
+        verify=False,  # explicitly injected by user, not a default
     )
+
+
+def _parse_can_dbc_arg(values: list[str]) -> list[tuple[str, str]]:
+    """Parse repeated --can-dbc NAME=PATH into a list of (name, path) tuples."""
+    out = []
+    for v in values:
+        if "=" not in v:
+            raise SystemExit(
+                f"--can-dbc expects NAME=PATH, got: '{v}'"
+            )
+        name, path = v.split("=", 1)
+        name = name.strip()
+        path = path.strip()
+        if not name or not path:
+            raise SystemExit(f"--can-dbc: empty name or path in '{v}'")
+        out.append((name, path))
+    return out
 
 
 def _write_output(report_text: str, out_path: str | None, fmt: str, report_dict=None):
@@ -72,6 +117,8 @@ def _write_output(report_text: str, out_path: str | None, fmt: str, report_dict=
 
 def cmd_predict(args) -> int:
     console = Console(highlight=False, no_color=args.no_color)
+
+    can_dbc_mappings = _parse_can_dbc_arg(args.can_dbc) if args.can_dbc else None
 
     if args.dbc and not args.soc and not args.topology:
         # CAN health report only
@@ -98,11 +145,12 @@ def cmd_predict(args) -> int:
         return 0
 
     if args.soc:
-        topology = _load_soc(args.soc, args.dbc)
+        topology = _load_soc(args.soc, args.dbc, can_dbc_mappings)
     elif args.topology:
         topology = load_topology(args.topology)
+        _apply_dbcs(topology, args.dbc, can_dbc_mappings)
     else:
-        print("Specify one of: --dbc / --soc / -t", file=sys.stderr)
+        print("Specify one of: --dbc / --soc / -t / --can-dbc", file=sys.stderr)
         return 2
 
     prediction = predict(topology)
@@ -165,7 +213,14 @@ def build_parser() -> argparse.ArgumentParser:
     src = pp.add_mutually_exclusive_group()
     src.add_argument("-t", "--topology", help="Path to topology YAML.")
     src.add_argument("--soc", help="SoC preset name (e.g. rk3588).")
-    pp.add_argument("--dbc", help="DBC file path (CAN health report, or inject into --soc/-t).")
+    pp.add_argument("--dbc", help="DBC file path (CAN health report, or inject into first CAN slot of --soc/-t).")
+    pp.add_argument(
+        "--can-dbc",
+        action="append",
+        metavar="NAME=PATH",
+        help="Inject a DBC into a specific CAN master slot (repeatable). "
+             "Example: --can-dbc CAN0=powertrain.dbc --can-dbc CAN2=chassis.dbc",
+    )
     pp.add_argument("--can-bitrate", type=float, help="Override CAN bitrate (kbps) for DBC mode.")
     pp.add_argument("-o", "--output", help="Write report to file (json/yaml by extension).")
     pp.add_argument(
@@ -191,7 +246,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except SystemExit as e:
+        # SystemExit may carry a string (printed by helpers) — print and map to non-zero
+        if e.code and isinstance(e.code, str):
+            print(e.code, file=sys.stderr)
+        return int(e.code) if isinstance(e.code, int) else 1
 
 
 if __name__ == "__main__":

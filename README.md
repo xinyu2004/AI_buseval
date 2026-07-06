@@ -38,7 +38,12 @@ buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 # 2. DBC + preset combined (full evaluation)
 buseval predict --soc tda4vh --dbc examples/sample.dbc
 
-# 3. Configure your own YAML
+# 3. Multi-CAN: route different DBCs to specific CAN controllers
+buseval predict --soc tda4vh \
+    --can-dbc CAN0=examples/sample.dbc \
+    --can-dbc CAN2=examples/sample_heavy.dbc
+
+# 4. Configure your own YAML
 cp examples/full_menu.yaml my.yaml
 buseval lint my.yaml
 buseval predict -t my.yaml

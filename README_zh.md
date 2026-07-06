@@ -38,7 +38,12 @@ buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 # 2. DBC + 预设联动（完整评估）
 buseval predict --soc tda4vh --dbc examples/sample.dbc
 
-# 3. 自配 YAML
+# 3. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
+buseval predict --soc tda4vh \
+    --can-dbc CAN0=examples/sample.dbc \
+    --can-dbc CAN2=examples/sample_heavy.dbc
+
+# 4. 自配 YAML
 cp examples/full_menu.yaml my.yaml
 buseval lint my.yaml
 buseval predict -t my.yaml
