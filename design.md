@@ -1,4 +1,4 @@
-# busval 设计文档
+# buseval 设计文档
 
 ## 1. 设计目标
 
@@ -217,11 +217,11 @@ Assumptions (需确认):
 ## 14. CLI
 
 ```
-busval predict --dbc f.dbc                    # CAN 健康报告
-busval predict --soc <chip>                   # 预设评估
-busval predict --soc <chip> --dbc f.dbc       # DBC+预设
-busval predict -t my.yaml                     # 自配
-busval lint -t my.yaml
+buseval predict --dbc f.dbc                    # CAN 健康报告
+buseval predict --soc <chip>                   # 预设评估
+buseval predict --soc <chip> --dbc f.dbc       # DBC+预设
+buseval predict -t my.yaml                     # 自配
+buseval lint -t my.yaml
 ```
 
 公共参数：`-o/--output report.yaml` `--format {table,json,yaml}` `--no-color`
@@ -229,7 +229,7 @@ busval lint -t my.yaml
 ## 15. 目录结构
 
 ```
-src/busval/
+src/buseval/
 ├── __init__.py
 ├── cli.py
 ├── schema.py
@@ -281,7 +281,7 @@ tests/
 ## 17. 路线图（Phase 2-4）
 
 - **Phase 2**：collect 层（perf/ddr-perf 采集 + parser + CLI collect）
-- **Phase 3**：compare 引擎（偏差归因链）+ `busval diff A B` scenario 对比
+- **Phase 3**：compare 引擎（偏差归因链）+ `buseval diff A B` scenario 对比
 - **Phase 4**：系数自校准（实测反推 read_factor）+ Web UI（FastAPI 暴露 engine）
 
 ## 18. 开放问题（待 Phase 1 后复盘）

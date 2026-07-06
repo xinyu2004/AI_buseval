@@ -1,12 +1,12 @@
 [English](README.md) | [中文](README_zh.md)
 
-# busval — SoC Bandwidth Evaluation Tool
+# buseval — SoC Bandwidth Evaluation Tool
 
 Predict and measure whether DDR bandwidth is sufficient on multi-core heterogeneous SoCs, covering peripherals (CAN / SPI / MIPI / USB / ETH / FLASH) and internal pipelines (ISP / NPU / GPU / Display), and compare predicted vs. measured values.
 
 ## Why
 
-Modern SoCs are multi-core heterogeneous systems with many peripherals and accelerators. Bandwidth is often estimated by gut feel in early project stages, and DDR insufficiency is only discovered during measurement — when rework is expensive. busval turns "early prediction" and "measurement comparison" into a repeatable, auditable engineering workflow.
+Modern SoCs are multi-core heterogeneous systems with many peripherals and accelerators. Bandwidth is often estimated by gut feel in early project stages, and DDR insufficiency is only discovered during measurement — when rework is expensive. buseval turns "early prediction" and "measurement comparison" into a repeatable, auditable engineering workflow.
 
 ## Overall Goal
 
@@ -29,19 +29,19 @@ Only the **early prediction** loop is delivered. No collection or comparison yet
 ## Quick Start
 
 ```bash
-pip install busval
+pip install buseval
 
 # 1. Try a sample (zero config)
-busval predict --soc rk3588
-busval predict --dbc examples/sample.dbc
+buseval predict --soc rk3588
+buseval predict --dbc examples/sample.dbc
 
 # 2. DBC + preset combined (full evaluation)
-busval predict --soc tda4vh --dbc examples/sample.dbc
+buseval predict --soc tda4vh --dbc examples/sample.dbc
 
 # 3. Configure your own YAML
 cp examples/full_menu.yaml my.yaml
-busval lint my.yaml
-busval predict -t my.yaml
+buseval lint my.yaml
+buseval predict -t my.yaml
 ```
 
 ## Roadmap
@@ -62,7 +62,7 @@ TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Al
 ## Documentation
 
 - Design doc: [design.md](design.md)
-- Estimation coefficients: `src/busval/estimators/_coefficients.yaml`
+- Estimation coefficients: `src/buseval/estimators/_coefficients.yaml`
 - Changelog: `CHANGELOG.md`
 
 ## License
