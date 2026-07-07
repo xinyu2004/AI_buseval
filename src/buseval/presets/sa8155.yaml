@@ -12,9 +12,9 @@ masters:
 pipelines:
   - name: ISP0
     type: isp
+    source: CSI1              # option: inherit input stream from a master (CSI/DSI). Null = use params.width/height/fps.
     mode: serial
     verify: true
-    params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
     stages:
       - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic, read_factor: 1.5, write_factor: 2.0}

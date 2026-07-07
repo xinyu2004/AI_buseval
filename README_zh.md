@@ -64,6 +64,37 @@ MIPI CSI / DSI 支持 `count` 参数，建模单端口多路复用（MIPI 虚拟
 `count: 4` 表示一个 CSI 口接 4 路摄像头，做最坏情况带宽评估；lane 容量按聚合带宽检查。
 默认 1（向后兼容）。
 
+## Pipeline 连线（`source`）与 ISP stages
+
+pipeline（ISP / NPU）可声明可选的 `source` 字段，指向某个 master（如 `CSI1`），
+继承其图像尺寸（width/height/fps/bpp/count）。estimator 用这些尺寸自己算帧流——
+没有单独的带宽字段，用户只改宽高/fps。直接从 DDR 读的 IP（无 CSI 源）保持
+`source: null`，把 width/height/fps/bpp 直接写在 `params` 里即可（效果一样）。
+
+```yaml
+pipelines:
+  - name: ISP0
+    type: isp
+    source: CSI1              # option: 从 CSI1 继承 width/height/fps/bpp/count（null = 用 params）
+    mode: serial              # serial = 各级取 max；parallel = 各级求和
+    stages:                   # 完全可自定义 — 名称和系数任意
+      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
+      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
+      # 厂商专有级 — 任意名称、任意系数：
+      - {name: 我的NR,     read_factor: 1.8, write_factor: 1.2}
+      - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
+    # 每级 DDR 流量 = frame_stream × factor
+  - name: NPU0
+    type: npu
+    source: CSI0              # option: NPU 从 DDR 读 CSI0 的 4 路帧（继承尺寸）
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
+    # DDR 直读输入（无 CSI）：source: null + params: {width, height, fps, bpp, ...}
+```
+
+所有 SoC 预设默认带一条连线（CSI1→ISP0、CSI0→NPU0）作为起点，
+按你的板子在 YAML 里改即可。
+
 ## 支持的 SoC 预设
 
 TI TDA4VH / NVIDIA Orin NX / 地平线 J5 / 高通 SA8155 / 瑞芯微 RK3588 / 全志 T527 / NXP S32G

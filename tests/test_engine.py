@@ -168,3 +168,145 @@ def test_sample_heavy_dbc_loads():
     # 17 messages, 64-byte frames, total ~548 kbps on 2Mbps = ~27% load
     assert bus.load_pct > 0.1
     assert len(bus.top_messages) > 0
+
+
+def test_predict_source_inherits_master_dimensions():
+    """Pipeline with source inherits the master's width/height/fps/bpp/count and
+    recomputes the frame stream from those (no pre-computed bandwidth field)."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+
+    topo = Topology(
+        masters=[
+            Master(name="CSI0", type="mipi_csi",
+                   params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4}),
+        ],
+        pipelines=[
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    npu = next(i for i in result.items if i.name == "NPU0")
+    # NPU read should include the 4-cam frame stream: 1920*1080*30*12*4/8/1e6 = 373.248 MB/s
+    assert npu.breakdown["source"] == "CSI0"
+    assert abs(npu.breakdown["input_frame_mbps"] - 373.248) < 1e-3
+
+
+def test_predict_assumptions_one_row_per_item_with_source():
+    """Predictor-level assumptions: each item appears at most once, with source
+    wiring + verify notes joined into a single message."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+
+    topo = Topology(
+        masters=[
+            Master(name="CSI0", type="mipi_csi", verify=True,
+                   params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4}),
+            Master(name="CSI1", type="mipi_csi", verify=True,
+                   params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2}),
+        ],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial", verify=True,
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel", verify=True,
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    assumptions = result.assumptions
+
+    # each item appears at most once
+    from collections import Counter
+    counts = Counter(a["item"] for a in assumptions)
+    assert all(c == 1 for c in counts.values()), f"duplicate items: {counts}"
+
+    # ISP0 row mentions source CSI1
+    isp_row = next(a for a in assumptions if a["item"] == "ISP0")
+    assert "CSI1" in isp_row["message"]
+    assert "uses unverified default value" in isp_row["message"]
+
+    # NPU0 row mentions source CSI0 + input bandwidth
+    npu_row = next(a for a in assumptions if a["item"] == "NPU0")
+    assert "CSI0" in npu_row["message"]
+    assert "373.2" in npu_row["message"]
+    assert "uses unverified default value" in npu_row["message"]
+
+
+def test_predict_source_not_found_errors():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})],
+        pipelines=[
+            Pipeline(name="NPU0", type="npu", source="CSI9",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 10, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    with pytest.raises(ValueError, match="not found"):
+        predict(topo)
+
+
+def test_lint_source_p2p_unsupported():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", mode="serial",
+                     params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12},
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+            Pipeline(name="NPU0", type="npu", source="ISP0",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 10, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert any(i.rule == "source-pipeline" for i in issues)
+
+
+def test_lint_source_override_warns():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI1", type="mipi_csi",
+                        params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2})],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial",
+                     params={"width": 1920, "height": 1080, "fps": 30, "in_format": "raw12"},
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert any(i.rule == "source-override" for i in issues)
+
+
+def test_lint_npu_fps_exceeds_source():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
+        pipelines=[
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 50, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert any(i.rule == "npu-fps-exceeds-source" for i in issues)
+
+
+def test_lint_npu_fps_within_source_ok():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
+        pipelines=[
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 20, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert not any(i.rule == "npu-fps-exceeds-source" for i in issues)

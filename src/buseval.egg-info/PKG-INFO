@@ -756,6 +756,39 @@ MIPI CSI / DSI support a `count` parameter for multi-stream multiplexing on one 
 on one CSI port for worst-case bandwidth evaluation; lane capacity is checked against
 the aggregate. Defaults to 1 (backward compatible).
 
+## Pipeline Wiring (`source`) & ISP Stages
+
+Pipelines (ISP / NPU) can declare an optional `source` field naming a master
+(e.g. `CSI1`) whose image dimensions (width/height/fps/bpp/count) they inherit.
+The estimator recomputes the frame stream from those dimensions — no separate
+bandwidth field, users only ever edit width/height/fps. IPs that read directly
+from DDR (no CSI source) leave `source: null` and put width/height/fps/bpp
+directly in `params` (same effect).
+
+```yaml
+pipelines:
+  - name: ISP0
+    type: isp
+    source: CSI1              # option: inherit width/height/fps/bpp/count from CSI1 (null = use params)
+    mode: serial              # serial = max of stages; parallel = sum
+    stages:                   # fully customisable — name & factors are arbitrary
+      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
+      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
+      # vendor-specific stages — any name, any factor:
+      - {name: 我的NR,     read_factor: 1.8, write_factor: 1.2}
+      - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
+    # each stage's DDR traffic = frame_stream × factor
+  - name: NPU0
+    type: npu
+    source: CSI0              # option: NPU reads CSI0's 4-c frames from DDR (inherits dimensions)
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
+    # DDR-direct input (no CSI): source: null + params: {width, height, fps, bpp, ...}
+```
+
+All SoC presets ship with a default wiring (CSI1→ISP0, CSI0→NPU0) as a starting
+point; edit the YAML to match your board.
+
 ## Supported SoC Presets
 
 TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Allwinner T527 / NXP S32G

@@ -67,18 +67,36 @@ masters:
 pipelines:
   - name: ISP0
     type: isp
+    # option: source — name of a master (CSI/DSI) whose aggregate bandwidth this
+    # pipeline consumes as input. When set, ISP inherits input_stream_mbps from the
+    # source and ignores params.width/height/fps. Null (default) = ISP computes its
+    # own frame stream from params.width/height/fps/in_format (for IPs that read
+    # directly from DDR, not via a CSI master).
+    source: null                # e.g. CSI1 to wire ISP to CSI1's stream
     mode: serial            # serial: take max of stages; parallel: sum
     enabled: false
     verify: true
+    # When source is set, width/height/fps are optional (ignored). Shown here for
+    # the no-source case. Customise stages freely — name/factor are arbitrary;
+    # each stage's DDR traffic = frame_stream × factor.
     params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
     stages:
       - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
+      # add your vendor-specific stages here, e.g.:
+      # - {name: 我的NR,   read_factor: 1.8, write_factor: 1.2}
+      # - {name: WDR,      read_factor: 2.5, write_factor: 1.5}
     # read_factor/write_factor are multiples of the frame stream (w*h*fps*bpp/8)
 
   - name: NPU0
     type: npu
+    # option: source — name of a master (e.g. CSI0) whose image dimensions
+    # (width/height/fps/bpp/count) the NPU inherits to compute its input frame
+    # read bandwidth. The NPU reads those frames from DDR (added to weight + activation).
+    # For NPUs that read a pre-stored stream from DDR (not via CSI), leave source null
+    # and just put width/height/fps/bpp directly in params — same effect.
+    source: null                # e.g. CSI0 to wire NPU to CSI0's 4-cam stream
     mode: parallel
     enabled: false
     verify: true

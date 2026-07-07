@@ -11,15 +11,16 @@ masters:
 pipelines:
   - name: ISP0
     type: isp
+    source: CSI1              # option: inherit input stream from a master (CSI/DSI). Null = use params.width/height/fps.
     mode: serial
     verify: true
-    params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
     stages:
       - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
   - name: NPU0
     type: npu
+    source: CSI0              # option: NPU reads CSI0's 4-cam aggregate from DDR as inference input
     mode: parallel
     verify: true
     params: {params_mbytes: 30, activation_mbytes: 15, inference_fps: 30, tops_peak: 2, tops_used: 1.5}

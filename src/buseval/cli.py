@@ -153,7 +153,11 @@ def cmd_predict(args) -> int:
         print("Specify one of: --dbc / --soc / -t / --can-dbc", file=sys.stderr)
         return 2
 
-    prediction = predict(topology)
+    try:
+        prediction = predict(topology)
+    except ValueError as e:
+        print(f"Prediction error: {e}", file=sys.stderr)
+        return 2
 
     if args.format == "json":
         print(dump_json(build_structured(prediction)))

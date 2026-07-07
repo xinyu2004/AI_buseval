@@ -160,3 +160,73 @@ def test_can_dbc_estimator_with_sample():
     r = est.estimate({"dbc_path": str(dbc)})
     assert r.read_bw_mbps >= 0
     assert "messages" in r.breakdown
+
+
+def test_isp_with_inherited_dimensions():
+    """ISP computes frame_stream from width/height/fps/bpp/count (inherited from source)."""
+    est = get_estimator("isp")
+    r = est.estimate({
+        "width": 1280, "height": 720, "fps": 60, "bpp": 12,
+        "source": "CSI1",
+        "mode": "serial",
+        "stages": [{"name": "a", "read_factor": 1.5, "write_factor": 2.0}],
+    })
+    # frame_stream = 1280*720*60*12/8/1e6 = 82.944 MB/s
+    # stage read = 82.944*1.5 = 124.416, write = 82.944*2.0 = 165.888
+    assert abs(r.read_bw_mbps - 124.416) < 1e-3
+    assert abs(r.write_bw_mbps - 165.888) < 1e-3
+    assert r.breakdown["source"] == "CSI1"
+    assert "from CSI1" in r.dominant_factor
+
+
+def test_isp_count_multiplies_frame_stream():
+    est = get_estimator("isp")
+    single = est.estimate({
+        "width": 1920, "height": 1080, "fps": 30, "bpp": 12,
+        "mode": "serial",
+        "stages": [{"name": "x", "read_factor": 1.0, "write_factor": 1.0}],
+    })
+    multi = est.estimate({
+        "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4,
+        "mode": "serial",
+        "stages": [{"name": "x", "read_factor": 1.0, "write_factor": 1.0}],
+    })
+    assert abs(multi.read_bw_mbps - single.read_bw_mbps * 4) < 1e-6
+
+
+def test_npu_inherits_input_frame_dimensions():
+    """NPU with width/height/fps/bpp computes input frame bandwidth and adds to read."""
+    est = get_estimator("npu")
+    base = est.estimate({"params_mbytes": 100, "activation_mbytes": 50, "inference_fps": 100})
+    with_input = est.estimate({
+        "params_mbytes": 100, "activation_mbytes": 50, "inference_fps": 100,
+        "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4,
+        "source": "CSI0",
+    })
+    # inference_fps=100 > source fps=30 → capped to 30
+    # input frame = 1920*1080*30*12*4/8/1e6 = 373.248 MB/s
+    assert abs((with_input.read_bw_mbps - base.read_bw_mbps) - 373.248) < 1e-3
+    assert with_input.write_bw_mbps == base.write_bw_mbps
+    assert with_input.breakdown["effective_fps"] == 30.0
+    assert with_input.breakdown["source_fps"] == 30.0
+    assert any("capped to 30" in a for a in with_input.assumptions)
+    # source wiring is a declared fact, not an estimator-level assumption risk;
+    # but the fps-exceeds-source warning IS a real risk → present in assumptions
+    assert not any("CSI0" in a for a in with_input.assumptions)
+    assert "CSI0" in with_input.dominant_factor
+
+
+def test_npu_drops_frames_when_inference_slower_than_source():
+    """When inference_fps < source_fps, NPU reads fewer frames (drops some)."""
+    est = get_estimator("npu")
+    r = est.estimate({
+        "params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 20,
+        "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4,
+        "source": "CSI0",
+    })
+    # effective_fps = min(20, 30) = 20
+    # input = 1920*1080*20*12*4/8/1e6 = 248.832 MB/s
+    assert r.breakdown["effective_fps"] == 20.0
+    assert abs(r.breakdown["input_frame_mbps"] - 248.832) < 1e-3
+    # no fps-exceeds warning (inference < source is fine)
+    assert not any("capped" in a for a in r.assumptions)
