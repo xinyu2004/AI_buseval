@@ -279,6 +279,89 @@ def test_can_dbc_injection_enables_can():
     assert can0.enabled is True
 
 
+def test_assumptions_have_level_field():
+    """Every assumption row carries a 'level' (red/yellow/info)."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="USB0", type="usb", verify=True,
+                        params={"version": "3", "util_pct": 0.4})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    for a in result.assumptions:
+        assert "level" in a
+        assert a["level"] in ("red", "yellow", "info")
+
+
+def test_assumptions_ddr_near_full_is_red():
+    """When DDR util >= 80%, a RED assumption is added for the DDR channel."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="BIG", type="usb",
+                        params={"version": "3.2", "util_pct": 1.0})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100, efficiency=0.7)],
+    )
+    result = predict(topo)
+    ddr_rows = [a for a in result.assumptions if a["item"] == "DDR0"]
+    assert any(r["level"] == "red" and "near full" in r["message"] for r in ddr_rows)
+
+
+def test_assumptions_aggressive_util_is_red():
+    """USB util > 0.9 triggers a RED assumption."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="USB0", type="usb",
+                        params={"version": "3", "util_pct": 0.95})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    usb_rows = [a for a in result.assumptions if a["item"] == "USB0"]
+    assert any(r["level"] == "red" and "aggressive" in r["message"] for r in usb_rows)
+
+
+def test_assumptions_verify_is_info():
+    """verify=True → info level (unverified default is a provenance note, not a risk)."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="ETH0", type="eth", verify=True,
+                        params={"link_gbps": 1, "util_pct": 0.3, "mtu": 1500})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    eth_rows = [a for a in result.assumptions if a["item"] == "ETH0"]
+    assert eth_rows and eth_rows[0]["level"] == "info"
+
+
+def test_topology_hash_stable_for_same_topology():
+    """Same topology → same hash."""
+    from buseval.report.structured import build_structured
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="USB0", type="usb", params={"version": "3", "util_pct": 0.5})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=10000, efficiency=0.7)],
+    )
+    h1 = build_structured(predict(topo))["topology_hash"]
+    h2 = build_structured(predict(topo))["topology_hash"]
+    assert h1 == h2
+    assert len(h1) == 12
+
+
+def test_topology_hash_differs_for_different_topology():
+    from buseval.report.structured import build_structured
+    from buseval.schema import Master, DDRChannel, Topology
+    topo1 = Topology(
+        masters=[Master(name="USB0", type="usb", params={"version": "3", "util_pct": 0.5})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=10000, efficiency=0.7)],
+    )
+    topo2 = Topology(
+        masters=[Master(name="USB0", type="usb", params={"version": "3", "util_pct": 0.9})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=10000, efficiency=0.7)],
+    )
+    h1 = build_structured(predict(topo1))["topology_hash"]
+    h2 = build_structured(predict(topo2))["topology_hash"]
+    assert h1 != h2
+
+
 def test_predict_source_not_found_errors():
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
     topo = Topology(
@@ -418,6 +501,34 @@ def test_venc_with_pipeline_source_input_stream():
     assert abs(r.read_bw_mbps - 165.89) < 1e-3
     assert abs(r.write_bw_mbps - 165.89 / 50) < 1e-3
     assert "ISP0" in r.dominant_factor
+
+
+def test_predict_dsi_sources_display_zero_ddr():
+    """DSI p2p from Display: DSI carries Display's read_bw, but DSI's own DDR=0
+    (Display already counts the framebuffer read). Lane capacity is validated."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI1", type="mipi_csi",
+                        params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2})],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 2.0}]),
+            Pipeline(name="DISP0", type="display", source="ISP0"),
+            Pipeline(name="DSI0", type="mipi_dsi", source="DISP0",
+                     params={"lanes": 4}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    disp = next(i for i in result.items if i.name == "DISP0")
+    dsi = next(i for i in result.items if i.name == "DSI0")
+    # DSI carries Display's read_bw
+    assert abs(dsi.breakdown["carried_mbps"] - disp.read_bw_mbps) < 1e-3
+    # DSI adds zero DDR traffic (Display already counts)
+    assert dsi.read_bw_mbps == 0.0
+    assert dsi.write_bw_mbps == 0.0
+    # Lane capacity checked
+    assert dsi.breakdown["lane_capacity_mbps"] == 750.0
 
 
 def test_lint_source_override_warns():

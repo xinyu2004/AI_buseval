@@ -80,6 +80,25 @@ def test_mipi_dsi_count_read_aggregate():
     assert r.write_bw_mbps == 0.0
 
 
+def test_mipi_dsi_p2p_source_zero_ddr():
+    """DSI with source_input_mbps (p2p from Display): DDR=0, lane check only."""
+    est = get_estimator("mipi_dsi")
+    r = est.estimate({"source_input_mbps": 165.9, "source": "DISP0", "lanes": 4})
+    assert r.read_bw_mbps == 0.0   # no DDR read (Display already counts)
+    assert r.write_bw_mbps == 0.0  # no DDR write (data goes to panel)
+    assert r.breakdown["mode"] == "p2p"
+    assert r.breakdown["carried_mbps"] == 165.9
+    assert r.breakdown["lane_capacity_mbps"] == 750.0
+    assert "DISP0" in r.dominant_factor
+
+
+def test_mipi_dsi_p2p_lane_overflow():
+    """DSI p2p: carried bandwidth exceeds lane capacity → RED assumption."""
+    est = get_estimator("mipi_dsi")
+    r = est.estimate({"source_input_mbps": 800.0, "source": "DISP0", "lanes": 4})
+    assert any("exceeds" in a for a in r.assumptions)
+
+
 def test_mipi_dsi_read_only():
     est = get_estimator("mipi_dsi")
     r = est.estimate({"width": 1920, "height": 1080, "fps": 60, "bpp": 24, "lanes": 4})

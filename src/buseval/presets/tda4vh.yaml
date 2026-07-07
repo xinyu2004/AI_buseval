@@ -43,6 +43,11 @@ pipelines:
     type: display
     source: ISP0              # p2p: Display reads ISP0's YUV output (EVS / viewfinder low-latency path)
     verify: true
+  - name: DSI0
+    type: mipi_dsi            # p2p: DSI carries Display's output to the physical MIPI DSI lanes
+    source: DISP0             # inherits Display's read_bw as carried bandwidth; DDR=0 (Display already counts)
+    verify: true
+    params: {lanes: 4}
 ddr_channels:
   - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # LPDDR4 4266, 32-bit
 alert_thresholds: {yellow: 0.6, red: 0.8}

@@ -1,4 +1,16 @@
-"""MIPI CSI / DSI estimator: resolution × fps × bpp, with lane capacity check."""
+"""MIPI CSI / DSI estimator: resolution × fps × bpp, with lane capacity check.
+
+Three modes:
+  1. Master (standalone): compute frame stream from width/height/fps/bpp/count.
+     CSI writes to DDR; DSI reads from DDR.
+  2. Pipeline with master source: inherit image dims from the source master,
+     compute frame stream, same DDR direction as master mode.
+  3. Pipeline with pipeline source (e.g. DSI source: DISP0): receive
+     source_input_mbps (upstream's carried bandwidth). Use it ONLY for lane
+     capacity validation — DDR traffic is NOT added (the upstream pipeline
+     already counts the DDR access). This avoids double-counting: Display reads
+     the framebuffer from DDR, DSI carries that data to the panel via p2p.
+"""
 from __future__ import annotations
 
 from ..registry import Estimator, register, get_coefficients
@@ -20,6 +32,41 @@ class MipiDsiEstimator(Estimator):
 def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
     key = "mipi"
     coeffs = get_coefficients()[key]
+    kind = "DSI" if is_dsi else "CSI"
+    source = params.get("source")
+
+    # --- Mode 3: pipeline source (e.g. DSI sourced from Display) ---
+    # source_input_mbps is the upstream's carried bandwidth. We use it for lane
+    # capacity validation only — DDR traffic is 0 (upstream already counts it).
+    if "source_input_mbps" in params:
+        carried_mbps = float(params["source_input_mbps"])
+        lanes = int(params.get("lanes", 1))
+        lane_cap_key = "dsi_lane_capacity_gbps" if is_dsi else "lane_capacity_gbps"
+        lane_cap_mbps = lanes * coeffs[lane_cap_key] * 1e9 / 8.0 / 1e6
+
+        assumptions = []
+        if carried_mbps > lane_cap_mbps:
+            assumptions.append(
+                f"carried {carried_mbps:.1f} MB/s exceeds {lanes}-lane capacity "
+                f"{lane_cap_mbps:.1f} MB/s"
+            )
+
+        return BandwidthEstimate(
+            read_bw_mbps=0.0,   # no DDR read — upstream (Display) already counts
+            write_bw_mbps=0.0,  # no DDR write — data goes to panel via p2p
+            breakdown={
+                "kind": kind,
+                "mode": "p2p",
+                "source": source,
+                "carried_mbps": round(carried_mbps, 4),
+                "lanes": lanes,
+                "lane_capacity_mbps": round(lane_cap_mbps, 2),
+            },
+            dominant_factor=f"{kind} {carried_mbps:.1f}MB/s ({lanes} lanes) from {source}",
+            assumptions=assumptions,
+        )
+
+    # --- Mode 1 & 2: standalone or master-source pipeline ---
     w = int(params["width"])
     h = int(params["height"])
     fps = float(params["fps"])
@@ -47,21 +94,22 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
     # CSI = input to DDR (write); DSI = output from DDR (read)
     if is_dsi:
         read_bw, write_bw = aggregate_mbps, 0.0
-        kind = "DSI"
     else:
         read_bw, write_bw = 0.0, aggregate_mbps
-        kind = "CSI"
 
     if count > 1:
         dominant = f"{count}x {w}x{h}@{fps}fps×{bpp}bpp ({lanes} lanes, {count} streams)"
     else:
         dominant = f"{w}x{h}@{fps}fps×{bpp}bpp ({lanes} lanes)"
+    if source:
+        dominant += f" from {source}"
 
     return BandwidthEstimate(
         read_bw_mbps=round(read_bw, 4),
         write_bw_mbps=round(write_bw, 4),
         breakdown={
             "kind": kind,
+            "mode": "standalone",
             "width": w,
             "height": h,
             "fps": fps,
@@ -72,6 +120,7 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
             "per_stream_mbps": round(per_stream_mbps, 4),
             "aggregate_mbps": round(aggregate_mbps, 4),
             "lane_capacity_mbps": round(lane_cap_mbps, 2),
+            "source": source,
         },
         dominant_factor=dominant,
         assumptions=assumptions,

@@ -13,19 +13,30 @@ from ..dbc.health_report import HealthReport
 
 _VERDICT_COLOR = {"OK": "green", "WARN": "yellow", "CRITICAL": "red"}
 
+# Assumption level → (tag, color) for the Lv column.
+_LEVEL_TAG = {
+    "red": ("RED", "bold red"),
+    "yellow": ("YEL", "bold yellow"),
+    "info": ("i", "dim cyan"),
+}
+
 # Color cycle for multi-source "from A+B+C" highlighting.
 _SOURCE_COLORS = ["bold cyan", "bold magenta", "bold yellow", "bold green", "bold blue"]
 
 
 def _build_source_color_map(items) -> dict:
-    """Build a {master_name: style} map by scanning all pipeline items' source_names
-    in order of first appearance. Ensures a source master has the SAME color everywhere
-    — both in its own NAME cell and in any pipeline's 'from X+Y' reference."""
+    """Build a {name: style} map by scanning all items' source references
+    (both `source_names` lists and single `source` fields) in order of first
+    appearance. Ensures any name referenced as a source keeps the SAME color
+    everywhere — both in its own NAME cell and in any pipeline's 'from X+Y'."""
     color_map = {}
     idx = 0
     for it in items:
         bd = it.breakdown if isinstance(it.breakdown, dict) else {}
-        names = bd.get("source_names") or []
+        names = list(bd.get("source_names") or [])
+        single = bd.get("source")
+        if single and single not in names:
+            names.append(single)
         for n in names:
             if n and n not in color_map:
                 color_map[n] = _SOURCE_COLORS[idx % len(_SOURCE_COLORS)]
@@ -35,23 +46,35 @@ def _build_source_color_map(items) -> dict:
 
 def _colorize_source(text: str, use_color: bool, color_map: dict | None = None):
     """Colorize the 'from <source>' suffix in a dominant_factor string so the
-    pipeline wiring stands out. Multi-source 'from A+B+C' gives each source a
-    different color. If color_map is provided, colors are consistent with the
-    NAME column (a source master keeps the same color everywhere)."""
-    if not use_color or " from " not in text:
+    pipeline wiring stands out. Handles both '... from X+Y' and '...(from X+Y)'
+    forms. Multi-source gives each source a different color. If color_map is
+    provided, colors are consistent with the NAME column."""
+    if not use_color:
         return text
     color_map = color_map or {}
-    idx = text.find(" from ")
+    # Find the last occurrence of "from " — works for both " from X" and "(from X"
+    idx = text.rfind("from ")
+    if idx < 0:
+        return text
     head = text[:idx]
-    names_part = text[idx + len(" from "):]  # "A+B+C"
+    # Preserve any separator before "from" (space or "(", etc.)
+    # Extract names part: everything after "from "
+    names_part = text[idx + len("from "):]
+    # Trim a trailing ")" if present (from the "(from X)" form)
+    trailing = ""
+    if names_part.endswith(")"):
+        names_part = names_part[:-1]
+        trailing = ")"
     names = names_part.split("+")
     out = Text(head)
-    out.append(" from ")
+    out.append("from ")
     for j, n in enumerate(names):
         if j > 0:
             out.append("+")
         style = color_map.get(n) or _SOURCE_COLORS[j % len(_SOURCE_COLORS)]
         out.append(n, style=style)
+    if trailing:
+        out.append(trailing)
     return out
 
 
@@ -128,14 +151,20 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
         )
     console.print(tt)
 
-    # Assumptions
+    # Assumptions (with RED/YEL/INFO level coloring)
     assumptions = prediction.assumptions
     if assumptions:
         ta = Table(title="Assumptions (verify before trusting)")
+        ta.add_column("Lv", justify="center", width=3)
         ta.add_column("Item")
         ta.add_column("Message")
         for a in assumptions:
-            ta.add_row(a["item"], a["message"])
+            lvl = a.get("level", "yellow")
+            tag, color = _LEVEL_TAG.get(lvl, ("?", "white"))
+            if use_color:
+                ta.add_row(Text(tag, style=color), a["item"], a["message"])
+            else:
+                ta.add_row(tag, a["item"], a["message"])
         console.print(ta)
     else:
         console.print("[green]No flagged assumptions.[/green]")

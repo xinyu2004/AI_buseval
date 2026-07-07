@@ -45,7 +45,7 @@ class DisplayEstimator(Estimator):
                     "source_input_mbps": round(bw, 4),
                     "source": params.get("source"),
                 },
-                dominant_factor=f"Display (from {params.get('source','?')})",
+                dominant_factor=f"Display {bw:.1f}MB/s from {params.get('source','?')}",
                 assumptions=[],
             )
         w = int(params["width"])

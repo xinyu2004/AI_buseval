@@ -29,27 +29,94 @@ class PredictionResult:
 
     @property
     def assumptions(self) -> list[dict]:
-        """One row per item, with all notes joined (risks + source wiring + verify).
-        Combining into one row avoids the same item appearing multiple times."""
+        """One row per item, with all notes joined. Each row carries a `level`:
+        - "red":    high-risk (DDR near-full, aggressive util >0.9, lane overflow)
+        - "yellow": unverified default / non-typical coefficient / CAN load >0.7
+        - "info":   source wiring (declared fact, shown for visibility)
+        The row's level is the most severe among its notes.
+        """
+        from ..estimators.registry import get_coefficients
+        try:
+            alert_cfg = get_coefficients().get("alerts", {})
+        except Exception:
+            alert_cfg = {}
+        ddr_near_full = float(alert_cfg.get("ddr_near_full_pct", 0.8))
+        aggressive_util = float(alert_cfg.get("aggressive_util_pct", 0.9))
+        aggressive_can = float(alert_cfg.get("aggressive_can_load_pct", 0.7))
+
         out = []
         for it in self.items:
-            notes = list(it.assumptions)
-            # source wiring info (a declared fact, shown here for visibility — not a risk)
+            notes: list[tuple[str, str]] = []  # (level, message)
             bd = it.breakdown if isinstance(it.breakdown, dict) else {}
-            # NPU stores source_names (list); ISP stores source (str)
+
+            # 1) estimator-internal assumptions (already classified by estimators)
+            for a in it.assumptions:
+                lvl = _classify_assumption(a, aggressive_util, aggressive_can)
+                notes.append((lvl, a))
+
+            # 2) source wiring (declared fact → info, not a risk)
             src_names = bd.get("source_names") or ([bd["source"]] if bd.get("source") else [])
             if src_names:
                 src_join = "+".join(src_names)
                 if it.type == "npu":
                     input_mbps = bd.get("input_frame_mbps", 0) or 0
-                    notes.append(f"input {input_mbps:.1f} MB/s from {src_join}")
+                    notes.append(("info", f"input {input_mbps:.1f} MB/s from {src_join}"))
                 else:
-                    notes.append(f"input from {src_join}")
+                    notes.append(("info", f"input from {src_join}"))
+
+            # 3) verify flag → info (unverified default is a provenance note, not a risk)
             if it.verify:
-                notes.append("uses unverified default value")
+                notes.append(("info", "uses unverified default value"))
+
             if notes:
-                out.append({"item": it.name, "message": "; ".join(notes)})
+                worst = _worst_level([n[0] for n in notes])
+                out.append({
+                    "item": it.name,
+                    "level": worst,
+                    "message": "; ".join(n[1] for n in notes),
+                })
+
+        # 4) DDR near-full warnings (one per channel at red/yellow)
+        from .margin import evaluate_margin
+        for m in evaluate_margin(self):
+            if m.read_util >= ddr_near_full:
+                out.append({
+                    "item": m.name,
+                    "level": "red",
+                    "message": f"read util {m.read_util*100:.1f}% >= {ddr_near_full*100:.0f}% (DDR near full)",
+                })
+            elif m.write_util >= ddr_near_full:
+                out.append({
+                    "item": m.name,
+                    "level": "red",
+                    "message": f"write util {m.write_util*100:.1f}% >= {ddr_near_full*100:.0f}% (DDR near full)",
+                })
         return out
+
+
+_LEVEL_ORDER = {"red": 3, "yellow": 2, "info": 1}
+
+
+def _worst_level(levels: list[str]) -> str:
+    return max(levels, key=lambda l: _LEVEL_ORDER.get(l, 0))
+
+
+def _classify_assumption(msg: str, aggressive_util: float, aggressive_can: float) -> str:
+    """Classify an estimator-internal assumption string into red/yellow/info."""
+    low = msg.lower()
+    if "exceeds" in low and "lane" in low:
+        return "red"           # lane overflow (physical impossibility)
+    if "aggressive" in low and "util" in low:
+        return "red"           # util > 0.9
+    if "tops_used" in low and ">" in low:
+        return "red"           # NPU tops over safety
+    if "non-typical" in low:
+        return "yellow"        # stage coefficient out of typical range
+    if "async" in low:
+        return "yellow"        # inference fps < source fps
+    if "aggressive" in low and "can" in low:
+        return "yellow"        # CAN load > 0.7
+    return "yellow"            # default: treat unknown assumptions as yellow
 
 
 def predict(topology: Topology) -> PredictionResult:
@@ -105,8 +172,15 @@ def predict(topology: Topology) -> PredictionResult:
                             f"pipeline '{p.name}': source '{sname}' is not computed "
                             f"(cyclic dependency or disabled upstream)."
                         )
-                    up_write = pipeline_item_bw[sname][1]
-                    sources_spec.append({"name": sname, "upstream_output_mbps": round(up_write, 4)})
+                    up_read, up_write = pipeline_item_bw[sname]
+                    # For DSI sourcing from Display: Display's "output" is its read_bw
+                    # (it reads framebuffer from DDR and carries it to the panel).
+                    # For other p2p (ISP→NPU, ISP→VENC): upstream's output is write_bw.
+                    if p.type == "mipi_dsi":
+                        carried = up_read
+                    else:
+                        carried = up_write
+                    sources_spec.append({"name": sname, "upstream_output_mbps": round(carried, 4)})
                 else:
                     raise ValueError(
                         f"pipeline '{p.name}': source '{sname}' not found among masters or pipelines."

@@ -1,6 +1,7 @@
 """Structured report: YAML / JSON serialization."""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -10,10 +11,33 @@ from ..engine.predictor import PredictionResult
 from ..engine.margin import evaluate_margin
 
 
+def _topology_hash(prediction: PredictionResult) -> str:
+    """Stable short hash of the topology (masters + pipelines + ddr + thresholds).
+    Two predictions share a hash iff they used the same topology structure."""
+    topo = prediction.topology
+    if topo is None:
+        return ""
+    payload = {
+        "masters": sorted(
+            [m.model_dump(exclude_none=True) for m in topo.masters],
+            key=lambda d: d.get("name", ""),
+        ),
+        "pipelines": sorted(
+            [p.model_dump(exclude_none=True) for p in topo.pipelines],
+            key=lambda d: d.get("name", ""),
+        ),
+        "ddr_channels": [c.model_dump(exclude_none=True) for c in topo.ddr_channels],
+        "alert_thresholds": topo.alert_thresholds,
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:12]
+
+
 def build_structured(prediction: PredictionResult) -> dict:
     margins = evaluate_margin(prediction)
     return {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "topology_hash": _topology_hash(prediction),
         "summary": {
             "total_read_mbps": round(prediction.total_read_mbps, 4),
             "total_write_mbps": round(prediction.total_write_mbps, 4),

@@ -822,7 +822,6 @@ TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Al
 
 - Design doc: [design.md](design.md)
 - Estimation coefficients: `src/buseval/estimators/_coefficients.yaml`
-- Changelog: `CHANGELOG.md`
 
 ## License
 
