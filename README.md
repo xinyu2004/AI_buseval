@@ -60,6 +60,11 @@ buseval predict -t my.yaml
 
 CAN (DBC) / CAN (load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH (NAND / eMMC / UFS) / ISP / NPU / GPU / Display
 
+MIPI CSI / DSI support a `count` parameter for multi-stream multiplexing on one port
+(MIPI virtual channels VC0-3, or deserializer aggregation). `count: 4` models 4 cameras
+on one CSI port for worst-case bandwidth evaluation; lane capacity is checked against
+the aggregate. Defaults to 1 (backward compatible).
+
 ## Supported SoC Presets
 
 TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Allwinner T527 / NXP S32G

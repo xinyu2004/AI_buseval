@@ -60,6 +60,10 @@ buseval predict -t my.yaml
 
 CAN(DBC) / CAN(load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH(NAND/eMMC/UFS) / ISP / NPU / GPU / Display
 
+MIPI CSI / DSI 支持 `count` 参数，建模单端口多路复用（MIPI 虚拟通道 VC0-3，或解串器汇聚）。
+`count: 4` 表示一个 CSI 口接 4 路摄像头，做最坏情况带宽评估；lane 容量按聚合带宽检查。
+默认 1（向后兼容）。
+
 ## 支持的 SoC 预设
 
 TI TDA4VH / NVIDIA Orin NX / 地平线 J5 / 高通 SA8155 / 瑞芯微 RK3588 / 全志 T527 / NXP S32G
