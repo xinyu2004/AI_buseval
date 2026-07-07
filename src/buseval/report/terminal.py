@@ -14,6 +14,17 @@ from ..dbc.health_report import HealthReport
 _VERDICT_COLOR = {"OK": "green", "WARN": "yellow", "CRITICAL": "red"}
 
 
+def _colorize_source(text: str, use_color: bool):
+    """Colorize the 'from <source>' suffix in a dominant_factor string so the
+    pipeline wiring stands out in the Top Contributors table."""
+    if not use_color or " from " not in text:
+        return text
+    idx = text.find(" from ")
+    out = Text(text[:idx])
+    out.append(text[idx:], style="bold cyan")
+    return out
+
+
 def render_terminal(prediction: PredictionResult, console: Console | None = None, use_color: bool = True) -> str:
     console = console or Console(no_color=not use_color, highlight=False)
     margins = evaluate_margin(prediction)
@@ -71,7 +82,7 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
             f"{it.write_bw_mbps:,.2f}",
             f"{s:,.2f}",
             f"{share:.1f}%",
-            it.dominant_factor,
+            _colorize_source(it.dominant_factor, use_color),
         )
     console.print(tt)
 

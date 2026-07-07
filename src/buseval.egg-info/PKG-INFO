@@ -776,7 +776,7 @@ pipelines:
       - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
       # vendor-specific stages — any name, any factor:
-      - {name: 我的NR,     read_factor: 1.8, write_factor: 1.2}
+      - {name: custom_NR,  read_factor: 1.8, write_factor: 1.2}
       - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
     # each stage's DDR traffic = frame_stream × factor
   - name: NPU0
