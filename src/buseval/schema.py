@@ -1,7 +1,7 @@
 """Pydantic data models for topology and bandwidth estimates."""
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,13 +35,14 @@ class Pipeline(BaseModel):
     type: str
     mode: Literal["serial", "parallel"] = "serial"
     enabled: bool = True
-    source: Optional[str] = Field(
+    source: Optional[Union[str, list[str]]] = Field(
         default=None,
-        description="Name of a master (e.g. CSI0) whose aggregate bandwidth this "
-        "pipeline consumes as input. Optional; when set, the pipeline inherits "
-        "input_stream_mbps from the source and does not need its own width/height/fps. "
-        "Use for IPs fed by a CSI/DSI stream. IPs that read directly from DDR "
-        "should leave this null and use params.input_stream_mbps instead.",
+        description="Name of a master (e.g. CSI0) or a list of masters (e.g. "
+        "[CSI0, CSI1]) whose image dimensions this pipeline consumes as input. "
+        "Optional; when set, the pipeline inherits width/height/fps/bpp/count "
+        "from each source and recomputes the frame stream (no sync/cap — each "
+        "source keeps its native fps). String form is backward-compatible. "
+        "Null = pipeline uses its own params.width/height/fps.",
     )
     params: dict = Field(default_factory=dict)
     stages: list[PipelineStage] = Field(default_factory=list)

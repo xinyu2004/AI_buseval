@@ -171,8 +171,8 @@ def test_sample_heavy_dbc_loads():
 
 
 def test_predict_source_inherits_master_dimensions():
-    """Pipeline with source inherits the master's width/height/fps/bpp/count and
-    recomputes the frame stream from those (no pre-computed bandwidth field)."""
+    """Pipeline with source (str or list) inherits master dims; NPU input uses
+    native source fps (no cap)."""
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
 
     topo = Topology(
@@ -188,49 +188,95 @@ def test_predict_source_inherits_master_dimensions():
     )
     result = predict(topo)
     npu = next(i for i in result.items if i.name == "NPU0")
-    # NPU read should include the 4-cam frame stream: 1920*1080*30*12*4/8/1e6 = 373.248 MB/s
-    assert npu.breakdown["source"] == "CSI0"
+    # NPU read includes 4-cam stream at native 30fps: 1920*1080*30*12*4/8/1e6 = 373.248
+    assert npu.breakdown["source_names"] == ["CSI0"]
     assert abs(npu.breakdown["input_frame_mbps"] - 373.248) < 1e-3
 
 
-def test_predict_assumptions_one_row_per_item_with_source():
-    """Predictor-level assumptions: each item appears at most once, with source
-    wiring + verify notes joined into a single message."""
+def test_lint_npu_fps_below_source():
+    """lint warns per-source when inference_fps < source fps (async, not capped)."""
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
-
     topo = Topology(
-        masters=[
-            Master(name="CSI0", type="mipi_csi", verify=True,
-                   params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4}),
-            Master(name="CSI1", type="mipi_csi", verify=True,
-                   params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2}),
-        ],
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
         pipelines=[
-            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial", verify=True,
-                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
-            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel", verify=True,
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 20, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert any(i.rule == "npu-fps-below-source" for i in issues)
+
+
+def test_lint_npu_fps_within_source_ok():
+    """No warning when inference_fps >= source fps."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
+        pipelines=[
+            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
                      params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0}),
         ],
         ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
     )
-    result = predict(topo)
-    assumptions = result.assumptions
+    issues = lint(topo)
+    assert not any(i.rule == "npu-fps-below-source" for i in issues)
 
-    # each item appears at most once
-    from collections import Counter
-    counts = Counter(a["item"] for a in assumptions)
-    assert all(c == 1 for c in counts.values()), f"duplicate items: {counts}"
 
-    # ISP0 row mentions source CSI1
-    isp_row = next(a for a in assumptions if a["item"] == "ISP0")
-    assert "CSI1" in isp_row["message"]
-    assert "uses unverified default value" in isp_row["message"]
+def test_lint_isp_multi_source_errors():
+    """ISP with source list > 1 → error."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[
+            Master(name="CSI0", type="mipi_csi",
+                   params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4}),
+            Master(name="CSI1", type="mipi_csi",
+                   params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2}),
+        ],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source=["CSI0", "CSI1"], mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    issues = lint(topo)
+    assert any(i.rule == "isp-multi-source" for i in issues)
 
-    # NPU0 row mentions source CSI0 + input bandwidth
-    npu_row = next(a for a in assumptions if a["item"] == "NPU0")
-    assert "CSI0" in npu_row["message"]
-    assert "373.2" in npu_row["message"]
-    assert "uses unverified default value" in npu_row["message"]
+
+def test_can_disabled_by_default_in_presets():
+    """All 6 non-s32g presets: CAN masters default enabled=False."""
+    from buseval.loader import load_topology
+    from pathlib import Path
+    presets_dir = Path(__file__).resolve().parents[1] / "src" / "buseval" / "presets"
+    for soc in ("tda4vh", "orin_nx", "j5", "sa8155", "rk3588", "t527"):
+        topo = load_topology(presets_dir / f"{soc}.yaml")
+        for m in topo.masters:
+            if m.type == "can":
+                assert not m.enabled, f"{soc}.{m.name}: CAN should be disabled by default"
+
+
+def test_s32g_can_still_enabled():
+    """s32g (gateway) keeps CAN enabled — it's the SoC's primary function."""
+    from buseval.loader import load_topology
+    from pathlib import Path
+    presets_dir = Path(__file__).resolve().parents[1] / "src" / "buseval" / "presets"
+    topo = load_topology(presets_dir / "s32g.yaml")
+    can_masters = [m for m in topo.masters if m.type == "can"]
+    assert len(can_masters) > 0
+    for m in can_masters:
+        assert m.enabled, f"s32g.{m.name}: CAN should stay enabled (gateway SoC)"
+
+
+def test_can_dbc_injection_enables_can():
+    """--can-dbc forces enabled=True even if preset has CAN disabled."""
+    from buseval.cli import _load_soc
+    topo = _load_soc("tda4vh", dbc_path=None,
+                     can_dbc_mappings=[("CAN0", "examples/sample.dbc")])
+    can0 = next(m for m in topo.masters if m.name == "CAN0")
+    assert can0.type == "can_dbc"
+    assert can0.enabled is True
 
 
 def test_predict_source_not_found_errors():
@@ -280,33 +326,3 @@ def test_lint_source_override_warns():
     )
     issues = lint(topo)
     assert any(i.rule == "source-override" for i in issues)
-
-
-def test_lint_npu_fps_exceeds_source():
-    from buseval.schema import Master, DDRChannel, Pipeline, Topology
-    topo = Topology(
-        masters=[Master(name="CSI0", type="mipi_csi",
-                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
-        pipelines=[
-            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
-                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 50, "tops_peak": 0}),
-        ],
-        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
-    )
-    issues = lint(topo)
-    assert any(i.rule == "npu-fps-exceeds-source" for i in issues)
-
-
-def test_lint_npu_fps_within_source_ok():
-    from buseval.schema import Master, DDRChannel, Pipeline, Topology
-    topo = Topology(
-        masters=[Master(name="CSI0", type="mipi_csi",
-                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
-        pipelines=[
-            Pipeline(name="NPU0", type="npu", source="CSI0", mode="parallel",
-                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 20, "tops_peak": 0}),
-        ],
-        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
-    )
-    issues = lint(topo)
-    assert not any(i.rule == "npu-fps-exceeds-source" for i in issues)

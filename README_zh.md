@@ -87,7 +87,10 @@ pipelines:
     # 每级 DDR 流量 = frame_stream × factor
   - name: NPU0
     type: npu
-    source: CSI0              # option: NPU 从 DDR 读 CSI0 的 4 路帧（继承尺寸）
+    source: [CSI0, CSI1]      # option: 多源 — NPU 分时读 CSI0（4 路）和 CSI1；
+                              #   各源用原生 fps（不同步、不 cap），
+                              #   input 是各源 MB/s 之和（不是 fps 之和），
+                              #   weight + activation 只算一次（模型共享）
     params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
     # DDR 直读输入（无 CSI）：source: null + params: {width, height, fps, bpp, ...}
 ```

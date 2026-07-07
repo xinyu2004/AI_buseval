@@ -37,8 +37,10 @@ def _load_soc(name: str, dbc_path: str | None, can_dbc_mappings: list[tuple[str,
 def _apply_dbcs(topology, dbc_path: str | None, can_dbc_mappings: list[tuple[str, str]] | None):
     """Inject DBC(s) into the topology.
 
-    - dbc_path (legacy --dbc): replace the first enabled CAN master.
+    - dbc_path (legacy --dbc): replace the first CAN master (regardless of enabled).
     - can_dbc_mappings (--can-dbc NAME=PATH): replace each named CAN master.
+    Either way, the injected can_dbc master is force-enabled (user explicitly
+    provided a DBC), so presets can keep CAN disabled by default.
     """
     if dbc_path and can_dbc_mappings:
         raise SystemExit("Use either --dbc or --can-dbc, not both.")
@@ -49,20 +51,17 @@ def _apply_dbcs(topology, dbc_path: str | None, can_dbc_mappings: list[tuple[str
 
 
 def _inject_first_can(topology, dbc_path: str):
-    """Replace the first enabled CAN master with a can_dbc estimator."""
-    from .schema import Master
-
+    """Replace the first CAN master (regardless of enabled state) with a can_dbc
+    estimator, force-enabled. If no CAN master exists, append one."""
     for i, m in enumerate(topology.masters):
-        if m.type == "can" and m.enabled:
+        if m.type == "can":
             topology.masters[i] = _make_dbc_master(m.name, dbc_path)
             return
     topology.masters.append(_make_dbc_master("CAN_DBC", dbc_path))
 
 
 def _inject_named_cans(topology, mappings: list[tuple[str, str]]):
-    """Replace each named CAN master with a can_dbc estimator."""
-    from .schema import Master
-
+    """Replace each named CAN master with a force-enabled can_dbc estimator."""
     by_name = {m.name: (i, m) for i, m in enumerate(topology.masters)}
     for name, dbc_path in mappings:
         if name not in by_name:
@@ -75,16 +74,18 @@ def _inject_named_cans(topology, mappings: list[tuple[str, str]]):
             raise SystemExit(
                 f"--can-dbc: target '{name}' is type '{m.type}', not a CAN master."
             )
-        topology.masters[i] = _make_dbc_master(name, dbc_path, keep_enabled=m.enabled)
+        topology.masters[i] = _make_dbc_master(name, dbc_path)
 
 
-def _make_dbc_master(name: str, dbc_path: str, keep_enabled: bool = True):
+def _make_dbc_master(name: str, dbc_path: str):
+    """Build a can_dbc master. Always enabled=True: the user explicitly provided
+    a DBC, so this CAN port is in use regardless of the preset's default."""
     from .schema import Master
 
     return Master(
         name=name,
         type="can_dbc",
-        enabled=keep_enabled,
+        enabled=True,
         params={"dbc_path": dbc_path, "direction": "both"},
         verify=False,  # explicitly injected by user, not a default
     )

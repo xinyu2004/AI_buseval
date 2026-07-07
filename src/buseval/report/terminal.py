@@ -13,16 +13,55 @@ from ..dbc.health_report import HealthReport
 
 _VERDICT_COLOR = {"OK": "green", "WARN": "yellow", "CRITICAL": "red"}
 
+# Color cycle for multi-source "from A+B+C" highlighting.
+_SOURCE_COLORS = ["bold cyan", "bold magenta", "bold yellow", "bold green", "bold blue"]
 
-def _colorize_source(text: str, use_color: bool):
+
+def _build_source_color_map(items) -> dict:
+    """Build a {master_name: style} map by scanning all pipeline items' source_names
+    in order of first appearance. Ensures a source master has the SAME color everywhere
+    — both in its own NAME cell and in any pipeline's 'from X+Y' reference."""
+    color_map = {}
+    idx = 0
+    for it in items:
+        bd = it.breakdown if isinstance(it.breakdown, dict) else {}
+        names = bd.get("source_names") or []
+        for n in names:
+            if n and n not in color_map:
+                color_map[n] = _SOURCE_COLORS[idx % len(_SOURCE_COLORS)]
+                idx += 1
+    return color_map
+
+
+def _colorize_source(text: str, use_color: bool, color_map: dict | None = None):
     """Colorize the 'from <source>' suffix in a dominant_factor string so the
-    pipeline wiring stands out in the Top Contributors table."""
+    pipeline wiring stands out. Multi-source 'from A+B+C' gives each source a
+    different color. If color_map is provided, colors are consistent with the
+    NAME column (a source master keeps the same color everywhere)."""
     if not use_color or " from " not in text:
         return text
+    color_map = color_map or {}
     idx = text.find(" from ")
-    out = Text(text[:idx])
-    out.append(text[idx:], style="bold cyan")
+    head = text[:idx]
+    names_part = text[idx + len(" from "):]  # "A+B+C"
+    names = names_part.split("+")
+    out = Text(head)
+    out.append(" from ")
+    for j, n in enumerate(names):
+        if j > 0:
+            out.append("+")
+        style = color_map.get(n) or _SOURCE_COLORS[j % len(_SOURCE_COLORS)]
+        out.append(n, style=style)
     return out
+
+
+def _name_cell(name: str, use_color: bool, color_map: dict):
+    """Render the NAME cell; if this item is a source master referenced by some
+    pipeline, color it to match its 'from X' appearance."""
+    if not use_color:
+        return name
+    style = color_map.get(name)
+    return Text(name, style=style) if style else name
 
 
 def render_terminal(prediction: PredictionResult, console: Console | None = None, use_color: bool = True) -> str:
@@ -61,6 +100,9 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
         prediction.items, key=lambda i: i.read_bw_mbps + i.write_bw_mbps, reverse=True
     )
     total = prediction.total_read_mbps + prediction.total_write_mbps
+    # Build a consistent source→color map so a source master keeps the same color
+    # in its NAME cell and in any pipeline's 'from X+Y' reference.
+    source_color_map = _build_source_color_map(prediction.items)
     tt = Table(title="Top Contributors (read + write)")
     tt.add_column("#")
     tt.add_column("Name")
@@ -76,13 +118,13 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
         share = (s / total * 100) if total else 0.0
         tt.add_row(
             str(i),
-            it.name,
+            _name_cell(it.name, use_color, source_color_map),
             it.type,
             f"{it.read_bw_mbps:,.2f}",
             f"{it.write_bw_mbps:,.2f}",
             f"{s:,.2f}",
             f"{share:.1f}%",
-            _colorize_source(it.dominant_factor, use_color),
+            _colorize_source(it.dominant_factor, use_color, source_color_map),
         )
     console.print(tt)
 

@@ -195,38 +195,91 @@ def test_isp_count_multiplies_frame_stream():
 
 
 def test_npu_inherits_input_frame_dimensions():
-    """NPU with width/height/fps/bpp computes input frame bandwidth and adds to read."""
+    """NPU with sources list: input = Σ per-source (w×h×src_fps×bpp×count/8), no cap."""
     est = get_estimator("npu")
     base = est.estimate({"params_mbytes": 100, "activation_mbytes": 50, "inference_fps": 100})
     with_input = est.estimate({
         "params_mbytes": 100, "activation_mbytes": 50, "inference_fps": 100,
-        "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4,
-        "source": "CSI0",
+        "sources": [{"name": "CSI0", "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4}],
     })
-    # inference_fps=100 > source fps=30 → capped to 30
-    # input frame = 1920*1080*30*12*4/8/1e6 = 373.248 MB/s
+    # input = 1920*1080*30*12*4/8/1e6 = 373.248 MB/s (native fps, no cap)
     assert abs((with_input.read_bw_mbps - base.read_bw_mbps) - 373.248) < 1e-3
     assert with_input.write_bw_mbps == base.write_bw_mbps
-    assert with_input.breakdown["effective_fps"] == 30.0
-    assert with_input.breakdown["source_fps"] == 30.0
-    assert any("capped to 30" in a for a in with_input.assumptions)
-    # source wiring is a declared fact, not an estimator-level assumption risk;
-    # but the fps-exceeds-source warning IS a real risk → present in assumptions
-    assert not any("CSI0" in a for a in with_input.assumptions)
+    assert with_input.breakdown["sources"][0]["name"] == "CSI0"
+    assert with_input.breakdown["source_names"] == ["CSI0"]
     assert "CSI0" in with_input.dominant_factor
 
 
-def test_npu_drops_frames_when_inference_slower_than_source():
-    """When inference_fps < source_fps, NPU reads fewer frames (drops some)."""
+def test_npu_multi_source_input_aggregated():
+    """Multi-source: input = sum of per-source MB/s (not fps). Different resolutions."""
+    est = get_estimator("npu")
+    r = est.estimate({
+        "params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30,
+        "sources": [
+            {"name": "CSI0", "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4},
+            {"name": "CSI1", "width": 1280, "height": 720, "fps": 60, "bpp": 12, "count": 1},
+        ],
+    })
+    # CSI0: 1920*1080*30*12*4/8/1e6 = 373.248
+    # CSI1: 1280*720*60*12*1/8/1e6 = 82.944
+    # total = 456.192
+    assert abs(r.breakdown["input_frame_mbps"] - 456.192) < 1e-3
+    assert len(r.breakdown["sources"]) == 2
+    assert "CSI0+CSI1" in r.dominant_factor
+
+
+def test_npu_multi_source_weight_not_doubled():
+    """weight_bw computed once (not per source)."""
+    est = get_estimator("npu")
+    single = est.estimate({
+        "params_mbytes": 100, "activation_mbytes": 0, "inference_fps": 30,
+        "sources": [{"name": "CSI0", "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4}],
+    })
+    multi = est.estimate({
+        "params_mbytes": 100, "activation_mbytes": 0, "inference_fps": 30,
+        "sources": [
+            {"name": "CSI0", "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4},
+            {"name": "CSI1", "width": 1280, "height": 720, "fps": 60, "bpp": 12, "count": 1},
+        ],
+    })
+    # weight_bw same (100MB * 30fps = 3000); only input_frame differs
+    assert single.breakdown["weight_bw_mbps"] == multi.breakdown["weight_bw_mbps"]
+
+
+def test_npu_no_cap_uses_native_fps():
+    """No sync/cap: inference_fps=20 < source fps=30 → input still uses source's 30fps."""
     est = get_estimator("npu")
     r = est.estimate({
         "params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 20,
-        "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4,
-        "source": "CSI0",
+        "sources": [{"name": "CSI0", "width": 1920, "height": 1080, "fps": 30, "bpp": 12, "count": 4}],
     })
-    # effective_fps = min(20, 30) = 20
-    # input = 1920*1080*20*12*4/8/1e6 = 248.832 MB/s
-    assert r.breakdown["effective_fps"] == 20.0
-    assert abs(r.breakdown["input_frame_mbps"] - 248.832) < 1e-3
-    # no fps-exceeds warning (inference < source is fine)
-    assert not any("capped" in a for a in r.assumptions)
+    # input uses native 30 (not capped to 20) = 373.248
+    assert abs(r.breakdown["input_frame_mbps"] - 373.248) < 1e-3
+    # soft warning: inference_fps < source fps
+    assert any("async" in a for a in r.assumptions)
+
+
+def test_npu_single_source_str_backward_compat():
+    """source: CSI0 (str) via predictor equals source: [CSI0] (list)."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    from buseval.engine.predictor import predict
+    topo_str = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
+        pipelines=[Pipeline(name="NPU0", type="npu", source="CSI0",
+                            params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    topo_list = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
+        pipelines=[Pipeline(name="NPU0", type="npu", source=["CSI0"],
+                            params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    r_str = predict(topo_str)
+    r_list = predict(topo_list)
+    npu_str = next(i for i in r_str.items if i.name == "NPU0")
+    npu_list = next(i for i in r_list.items if i.name == "NPU0")
+    assert npu_str.read_bw_mbps == npu_list.read_bw_mbps
+    assert npu_str.breakdown["source_names"] == npu_list.breakdown["source_names"]

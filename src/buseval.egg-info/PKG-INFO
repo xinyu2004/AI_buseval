@@ -781,7 +781,10 @@ pipelines:
     # each stage's DDR traffic = frame_stream × factor
   - name: NPU0
     type: npu
-    source: CSI0              # option: NPU reads CSI0's 4-c frames from DDR (inherits dimensions)
+    source: [CSI0, CSI1]      # option: multi-source — NPU reads both CSI0 (4-cam) and CSI1;
+                              #   each source uses its NATIVE fps (no sync/cap),
+                              #   input is the SUM of per-source MB/s (not fps),
+                              #   weight + activation are computed once (shared model)
     params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
     # DDR-direct input (no CSI): source: null + params: {width, height, fps, bpp, ...}
 ```

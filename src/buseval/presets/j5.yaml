@@ -1,8 +1,8 @@
 # Horizon Robotics Journey 5 (J5) — SoC preset. Public-spec estimates; verify before use.
 masters:
-  - {name: CAN0, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
-  - {name: CAN1, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
-  - {name: CAN2, type: can, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN0, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN1, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN2, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
   - {name: CSI0, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4, count: 4}}
   - {name: CSI1, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}
   - {name: CSI2, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}

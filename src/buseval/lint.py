@@ -91,53 +91,75 @@ def lint(topology: Topology) -> list[LintIssue]:
                     LintIssue("error", "param-range", f"{m.name}: unknown USB version '{v}'")
                 )
 
-    # Pipeline `source` validation
+    # Pipeline `source` validation (source may be str or list[str])
     master_by_name = {m.name: m for m in topology.masters}
     for p in enabled_pipelines:
-        if not p.source:
+        # Normalize source to a list
+        if p.source is None:
+            src_list = []
+        elif isinstance(p.source, str):
+            src_list = [p.source]
+        else:
+            src_list = list(p.source)
+
+        if not src_list:
             continue
-        if p.source in pipeline_names:
+
+        # ISP does not support multi-source
+        if p.type == "isp" and len(src_list) > 1:
             issues.append(
                 LintIssue(
                     "error",
-                    "source-pipeline",
-                    f"pipeline '{p.name}': source '{p.source}' references another pipeline; "
-                    f"pipeline-to-pipeline chaining is not supported yet.",
+                    "isp-multi-source",
+                    f"pipeline '{p.name}': ISP does not support multi-source (got {src_list}).",
                 )
             )
             continue
-        if p.source not in master_names:
-            issues.append(
-                LintIssue(
-                    "error",
-                    "source-not-found",
-                    f"pipeline '{p.name}': source '{p.source}' not found among masters.",
+
+        for sname in src_list:
+            if sname in pipeline_names:
+                issues.append(
+                    LintIssue(
+                        "error",
+                        "source-pipeline",
+                        f"pipeline '{p.name}': source '{sname}' references another pipeline; "
+                        f"pipeline-to-pipeline chaining is not supported yet.",
+                    )
                 )
-            )
-            continue
-        if p.type == "isp" and ("width" in p.params or "height" in p.params or "fps" in p.params):
-            issues.append(
-                LintIssue(
-                    "warning",
-                    "source-override",
-                    f"pipeline '{p.name}': source='{p.source}' provides input; "
-                    f"params.width/height/fps will be ignored.",
+                continue
+            if sname not in master_names:
+                issues.append(
+                    LintIssue(
+                        "error",
+                        "source-not-found",
+                        f"pipeline '{p.name}': source '{sname}' not found among masters.",
+                    )
                 )
-            )
-        # NPU inference_fps should not exceed source frame rate (can't infer faster
-        # than frames arrive). The estimator caps it, but flag for visibility.
-        if p.type == "npu":
-            inf_fps = p.params.get("inference_fps")
-            src_master = master_by_name.get(p.source)
-            src_fps = src_master.params.get("fps") if src_master else None
-            if inf_fps is not None and src_fps is not None and float(inf_fps) > float(src_fps):
+                continue
+            if p.type == "isp" and ("width" in p.params or "height" in p.params or "fps" in p.params):
                 issues.append(
                     LintIssue(
                         "warning",
-                        "npu-fps-exceeds-source",
-                        f"pipeline '{p.name}': inference_fps {inf_fps} > source "
-                        f"'{p.source}' fps {src_fps} (capped to {src_fps} in estimate).",
+                        "source-override",
+                        f"pipeline '{p.name}': source='{sname}' provides input; "
+                        f"params.width/height/fps will be ignored.",
                     )
                 )
+            # NPU: warn per-source if inference_fps < source fps (async, not capped,
+            # but worth flagging — NPU infers slower than frames arrive for that source)
+            if p.type == "npu":
+                inf_fps = p.params.get("inference_fps")
+                src_master = master_by_name.get(sname)
+                src_fps = src_master.params.get("fps") if src_master else None
+                if inf_fps is not None and src_fps is not None and float(inf_fps) < float(src_fps):
+                    issues.append(
+                        LintIssue(
+                            "warning",
+                            "npu-fps-below-source",
+                            f"pipeline '{p.name}': inference_fps {inf_fps} < source "
+                            f"'{sname}' fps {src_fps} (async; not capped — NPU infers "
+                            f"slower than frames arrive for this source).",
+                        )
+                    )
 
     return issues
