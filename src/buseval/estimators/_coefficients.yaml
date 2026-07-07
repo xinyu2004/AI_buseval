@@ -78,6 +78,17 @@ vdec:
 ddr:
   default_efficiency: 0.7
 
+# GMSL link bandwidth (independent tool, not part of topology)
+# link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
+gmsl:
+  default_blanking: 1.2         # 20% blanking (multiplier form, matches formula)
+  encoding_factor: 1.15         # 8b/10b + compression effective rate
+  overhead_factor: 1.067        # FEC + header + checksum
+  link_tiers:                   # for recommendation table (Mbps)
+    gmsl1: 1500
+    gmsl2: 3000
+    gmsl3: 6000
+
 # Alerts
 alerts:
   aggressive_util_pct: 0.9

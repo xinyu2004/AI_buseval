@@ -35,13 +35,15 @@ pip install -e .
 buseval predict --soc rk3588
 buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 
-# 2. DBC + 预设联动（完整评估）
-buseval predict --soc tda4vh --dbc examples/sample.dbc
-
-# 3. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
+# 2. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
 buseval predict --soc tda4vh \
     --can-dbc CAN0=examples/sample.dbc \
     --can-dbc CAN2=examples/sample_heavy.dbc
+
+# 3. GMSL 链路带宽（独立工具，单路）
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
+# 3b. GMSL 多路（YAML）
+buseval predict --GMSL examples/gmsl_links.yaml
 
 # 4. 自配 YAML
 cp examples/full_menu.yaml my.yaml
@@ -55,6 +57,26 @@ buseval predict -t my.yaml
 - **Phase 2**：实测采集（`perf` / `ddr-perf`）
 - **Phase 3**：预测 vs 实测对比 + 归因链 + `scenario diff`
 - **Phase 4**：系数自校准 + Web UI
+
+## GMSL 链路带宽
+
+独立工具（不属于 SoC topology）。计算给定摄像头分辨率下 GMSL 串行链路所需带宽：
+
+```
+link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
+```
+
+系数（blanking=1.2, encoding=1.15, overhead=1.067）在 `_coefficients.yaml` 中，
+可按调用覆盖。输出含 GMSL1/2/3 推荐表（1.5 / 3 / 6 Gbps），标注每路利用率和最佳匹配等级。
+
+```bash
+# 单路
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12 blanking=1.25
+
+# 多路 YAML（blanking 可在文件顶部全局设置）
+buseval predict --GMSL examples/gmsl_links.yaml
+```
 
 ## 支持的估算器
 

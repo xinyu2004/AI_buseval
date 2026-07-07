@@ -33,6 +33,9 @@ src/buseval/estimators/builtins/npu.py
 src/buseval/estimators/builtins/spi.py
 src/buseval/estimators/builtins/usb.py
 src/buseval/estimators/builtins/venc_vdec.py
+src/buseval/gmsl/__init__.py
+src/buseval/gmsl/calculator.py
+src/buseval/gmsl/report.py
 src/buseval/presets/j5.yaml
 src/buseval/presets/orin_nx.yaml
 src/buseval/presets/rk3588.yaml
@@ -45,3 +48,4 @@ src/buseval/report/structured.py
 src/buseval/report/terminal.py
 tests/test_engine.py
 tests/test_estimators.py
+tests/test_gmsl.py

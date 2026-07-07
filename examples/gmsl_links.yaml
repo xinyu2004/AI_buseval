@@ -1,0 +1,10 @@
+# GMSL multi-link bandwidth config (independent tool, not part of SoC topology).
+# Global overrides (optional, apply to all links; defaults from _coefficients.yaml):
+# blanking: 1.2
+# encoding_factor: 1.15
+# overhead_factor: 1.067
+links:
+  - {name: CAM_FRONT, width: 1920, height: 1080, fps: 30, bpp: 12}
+  - {name: CAM_REAR,  width: 1920, height: 1080, fps: 30, bpp: 12}
+  - {name: CAM_LEFT,  width: 1280, height: 720,  fps: 60, bpp: 12}
+  - {name: CAM_RIGHT, width: 1280, height: 720,  fps: 60, bpp: 12}

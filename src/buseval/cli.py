@@ -119,6 +119,10 @@ def _write_output(report_text: str, out_path: str | None, fmt: str, report_dict=
 def cmd_predict(args) -> int:
     console = Console(highlight=False, no_color=args.no_color)
 
+    # GMSL independent mode
+    if args.GMSL:
+        return cmd_gmsl(args, console)
+
     can_dbc_mappings = _parse_can_dbc_arg(args.can_dbc) if args.can_dbc else None
 
     if args.dbc and not args.soc and not args.topology:
@@ -180,6 +184,76 @@ def cmd_predict(args) -> int:
     return 0
 
 
+def cmd_gmsl(args, console: Console) -> int:
+    """GMSL link bandwidth calculator (independent of topology).
+
+    --GMSL accepts either:
+      - a YAML file path (single token, no '='): '--GMSL gmsl_links.yaml'
+      - space-separated key=value pairs: '--GMSL width=1920 height=1080 fps=30 bpp=12'
+      - (legacy) comma-separated: '--GMSL width=1920,height=1080,fps=30,bpp=12'
+    """
+    from .gmsl.calculator import parse_param_string, load_yaml, build_report_from_links
+    from .gmsl.report import render_gmsl_terminal, build_gmsl_structured
+    from .report.structured import dump_json, dump_yaml
+
+    tokens = args.GMSL  # list[str] (nargs='+')
+    joined = " ".join(tokens)
+    # Auto-distinguish: any token contains '=' → param string; else → YAML file
+    if "=" in joined:
+        try:
+            params = parse_param_string(joined)
+        except ValueError as e:
+            print(f"Failed to parse GMSL params: {e}", file=sys.stderr)
+            return 2
+        required = ("width", "height", "fps", "bpp")
+        missing = [k for k in required if k not in params]
+        if missing:
+            print(
+                f"GMSL params missing required keys: {', '.join(missing)} "
+                f"(e.g. --GMSL width=1920 height=1080 fps=30 bpp=12)",
+                file=sys.stderr,
+            )
+            return 2
+        overrides = {}
+        for k in ("blanking", "encoding_factor", "overhead_factor"):
+            if k in params:
+                overrides[k] = params.pop(k)
+        name = params.pop("name", "LINK1")
+        links_spec = [{**params, "name": name}]
+        report = build_report_from_links(links_spec, overrides)
+    else:
+        # YAML file (single token, no '=')
+        value = tokens[0]
+        p = Path(value)
+        if not p.exists():
+            print(f"GMSL YAML file not found: {value}", file=sys.stderr)
+            return 2
+        try:
+            links_spec, overrides = load_yaml(p)
+        except Exception as e:
+            print(f"Failed to parse GMSL YAML: {e}", file=sys.stderr)
+            return 2
+        if not links_spec:
+            print(f"GMSL YAML has no links: {value}", file=sys.stderr)
+            return 2
+        report = build_report_from_links(links_spec, overrides)
+
+    # output
+    if args.format == "json":
+        print(dump_json(build_gmsl_structured(report)))
+    elif args.format == "yaml":
+        print(dump_yaml(build_gmsl_structured(report)))
+    else:
+        render_gmsl_terminal(report, console=console, use_color=not args.no_color)
+
+    if args.output:
+        ext = Path(args.output).suffix.lower()
+        content = dump_json(build_gmsl_structured(report)) if ext == ".json" else dump_yaml(build_gmsl_structured(report))
+        Path(args.output).write_text(content, encoding="utf-8")
+
+    return 0
+
+
 def cmd_lint(args) -> int:
     topology = load_topology(args.topology)
     issues = lint(topology)
@@ -215,6 +289,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pp = sub.add_parser("predict", help="Predict DDR bandwidth from a topology / preset / DBC.")
+    pp.add_argument(
+        "--GMSL",
+        nargs="+",
+        metavar="KEY=VALUE | FILE",
+        help="GMSL link bandwidth calculator (independent of topology). "
+             "Single link: '--GMSL width=1920 height=1080 fps=30 bpp=12'. "
+             "Multi-link YAML: '--GMSL gmsl_links.yaml'.",
+    )
     src = pp.add_mutually_exclusive_group()
     src.add_argument("-t", "--topology", help="Path to topology YAML.")
     src.add_argument("--soc", help="SoC preset name (e.g. rk3588).")
