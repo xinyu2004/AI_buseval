@@ -56,31 +56,35 @@ def predict(topology: Topology) -> PredictionResult:
     items: list[ItemEstimate] = []
 
     # 1. Compute all master estimates first (pipelines may reference them via `source`).
+    master_item_bw: dict[str, tuple[float, float]] = {}  # name -> (read, write)
     for m in topology.masters:
         if not m.enabled:
             continue
         est = get_estimator(m.type)
         result: BandwidthEstimate = est.estimate(m.params)
-        items.append(_to_item(m.name, m.type, "master", result, getattr(m, "verify", False)))
+        it = _to_item(m.name, m.type, "master", result, getattr(m, "verify", False))
+        items.append(it)
+        master_item_bw[m.name] = (it.read_bw_mbps, it.write_bw_mbps)
 
-    # 2. Compute pipelines; resolve `source` (str or list) to inherit image dimensions.
+    # 2. Compute pipelines in topological order (a pipeline may source another pipeline).
+    #    source resolution:
+    #      - master source  → inherit image dims (w/h/fps/bpp/count); downstream computes frame stream
+    #      - pipeline source → inherit upstream's OUTPUT bandwidth (write_bw) as input_frame_mbps
     master_by_name = {m.name: m for m in topology.masters}
-    pipeline_names = {p.name for p in topology.pipelines}
-    for p in topology.pipelines:
+    pipeline_by_name = {p.name: p for p in topology.pipelines}
+
+    order = _topo_sort_pipelines(topology.pipelines)
+    pipeline_item_bw: dict[str, tuple[float, float]] = {}  # name -> (read, write)
+
+    for p in order:
         if not p.enabled:
             continue
         est = get_estimator(p.type)
         params = dict(p.params)
         params["mode"] = p.mode
         params["stages"] = [s.model_dump() for s in p.stages]
-        # Normalize source to a list of master names (None → [], str → [str]).
-        src_list = []
-        if p.source is not None:
-            if isinstance(p.source, str):
-                src_list = [p.source]
-            else:
-                src_list = list(p.source)
-        # Validate each source and collect image dims.
+        src_list = _normalize_source(p.source)
+
         if src_list:
             if p.type == "isp" and len(src_list) > 1:
                 raise ValueError(
@@ -88,33 +92,100 @@ def predict(topology: Topology) -> PredictionResult:
                 )
             sources_spec = []
             for sname in src_list:
-                if sname in pipeline_names:
+                if sname in master_by_name:
+                    src_m = master_by_name[sname]
+                    spec = {"name": sname}
+                    for k in ("width", "height", "fps", "bpp", "count"):
+                        if k in src_m.params:
+                            spec[k] = src_m.params[k]
+                    sources_spec.append(spec)
+                elif sname in pipeline_by_name:
+                    if sname not in pipeline_item_bw:
+                        raise ValueError(
+                            f"pipeline '{p.name}': source '{sname}' is not computed "
+                            f"(cyclic dependency or disabled upstream)."
+                        )
+                    up_write = pipeline_item_bw[sname][1]
+                    sources_spec.append({"name": sname, "upstream_output_mbps": round(up_write, 4)})
+                else:
                     raise ValueError(
-                        f"pipeline '{p.name}': source '{sname}' references another "
-                        f"pipeline; pipeline-to-pipeline chaining is not supported yet."
+                        f"pipeline '{p.name}': source '{sname}' not found among masters or pipelines."
                     )
-                if sname not in master_by_name:
-                    raise ValueError(
-                        f"pipeline '{p.name}': source '{sname}' not found among masters."
-                    )
-                src_m = master_by_name[sname]
-                spec = {"name": sname}
-                for k in ("width", "height", "fps", "bpp", "count"):
-                    if k in src_m.params:
-                        spec[k] = src_m.params[k]
-                sources_spec.append(spec)
-            # NPU reads the sources list; ISP reads width/height/fps directly
-            # (single source only), so flatten the first source's dims into params.
+            # Dispatch by estimator type.
+            # NPU: sources list — master sources carry dims (estimator computes MB/s),
+            #      pipeline sources carry pre-computed input_mbps (upstream write_bw).
             if p.type == "npu":
-                params["sources"] = sources_spec
+                npu_sources = []
+                for s in sources_spec:
+                    if "upstream_output_mbps" in s:
+                        npu_sources.append({
+                            "name": s["name"],
+                            "input_mbps": s["upstream_output_mbps"],
+                        })
+                    else:
+                        npu_sources.append(s)  # master source: dims
+                params["sources"] = npu_sources
             else:
-                # ISP / others: flatten single source dims into params + tag source name
-                for k in ("width", "height", "fps", "bpp", "count"):
-                    if k in sources_spec[0]:
-                        params[k] = sources_spec[0][k]
-                params["source"] = sources_spec[0]["name"]
+                # ISP / VENC / VDEC / Display: single source.
+                # - master source → flatten dims into params (estimator computes frame stream)
+                # - pipeline source → pass source_input_mbps (estimator uses it directly)
+                first = sources_spec[0]
+                if "upstream_output_mbps" in first:
+                    params["source_input_mbps"] = first["upstream_output_mbps"]
+                    params["source"] = first["name"]
+                else:
+                    for k in ("width", "height", "fps", "bpp", "count"):
+                        if k in first:
+                            params[k] = first[k]
+                    params["source"] = first["name"]
+
         result = est.estimate(params)
-        items.append(_to_item(p.name, p.type, "pipeline", result, getattr(p, "verify", False)))
+        it = _to_item(p.name, p.type, "pipeline", result, getattr(p, "verify", False))
+        items.append(it)
+        pipeline_item_bw[p.name] = (it.read_bw_mbps, it.write_bw_mbps)
+
+    total_r = sum(it.read_bw_mbps for it in items)
+    total_w = sum(it.write_bw_mbps for it in items)
+    return PredictionResult(items=items, total_read_mbps=total_r, total_write_mbps=total_w, topology=topology)
+
+
+def _normalize_source(source) -> list[str]:
+    if source is None:
+        return []
+    if isinstance(source, str):
+        return [source]
+    return list(source)
+
+
+def _topo_sort_pipelines(pipelines) -> list:
+    """Topologically sort pipelines so that any pipeline sourced by another comes
+    first. Raises ValueError on cyclic dependencies."""
+    by_name = {p.name: p for p in pipelines}
+    visited: dict[str, int] = {}  # 0=visiting, 1=done
+    order: list = []
+
+    def visit(name: str, stack: list[str]):
+        state = visited.get(name)
+        if state == 1:
+            return
+        if state == 0:
+            cycle = " -> ".join(stack + [name])
+            raise ValueError(f"cyclic pipeline dependency: {cycle}")
+        p = by_name.get(name)
+        if p is None:
+            return
+        visited[name] = 0
+        stack.append(name)
+        for s in _normalize_source(p.source):
+            if s in by_name:
+                visit(s, stack)
+        stack.pop()
+        visited[name] = 1
+        order.append(p)
+
+    for p in pipelines:
+        visit(p.name, [])
+    return order
 
     total_r = sum(it.read_bw_mbps for it in items)
     total_w = sum(it.write_bw_mbps for it in items)

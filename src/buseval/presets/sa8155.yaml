@@ -19,14 +19,19 @@ pipelines:
       - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
+  - name: VENC0
+    type: venc
+    source: ISP0
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h264}
   - name: GPU0
     type: gpu
     verify: true
     params: {width: 1920, height: 720, fps: 60, bpp: 32, overdraw: 3}
   - name: DISP0
     type: display
+    source: ISP0
     verify: true
-    params: {width: 1920, height: 720, fps: 60, bpp: 32}
 ddr_channels:
   - {name: DDR0, theoretical_peak_mbps: 34133, efficiency: 0.7}  # LPDDR4X 4266, 128-bit (quad-channel effective)
 alert_thresholds: {yellow: 0.6, red: 0.8}

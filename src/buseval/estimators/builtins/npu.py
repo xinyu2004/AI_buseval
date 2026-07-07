@@ -31,13 +31,25 @@ class NpuEstimator(Estimator):
         weight_bw = params_mb / latency_s  # MB/s (loaded once, shared across sources)
         act_bw = act_mb * coeffs["activation_read_write_factor"] / latency_s
 
-        # Multi-source input frames: each source uses its own native fps (no cap/sync).
-        # input_frame_mbps = Σ per source (w × h × src_fps × bpp × count / 8).
+        # Multi-source input frames: each master source uses its own native fps
+        # (no cap/sync); pipeline sources contribute a pre-computed output MBps.
+        # input_frame_mbps = Σ per master source (w × h × src_fps × bpp × count / 8)
+        #                   + Σ per pipeline source (upstream_output_mbps)
         sources_spec = params.get("sources", [])
         per_source = []
         input_frame_mbps = 0.0
         assumptions = []
         for s in sources_spec:
+            if "input_mbps" in s:
+                # Pipeline source: pre-computed upstream output bandwidth.
+                mbps = float(s["input_mbps"])
+                input_frame_mbps += mbps
+                per_source.append({
+                    "name": s.get("name"),
+                    "input_mbps": round(mbps, 4),
+                    "kind": "pipeline",
+                })
+                continue
             w = int(s["width"])
             h = int(s["height"])
             src_fps = float(s["fps"])
@@ -50,8 +62,8 @@ class NpuEstimator(Estimator):
                 "width": w, "height": h, "fps": src_fps,
                 "bpp": bpp, "count": count,
                 "input_mbps": round(mbps, 4),
+                "kind": "master",
             })
-            # Soft warning: source fps faster than inference fps (async, not capped)
             if fps < src_fps:
                 assumptions.append(
                     f"inference_fps {fps} < source '{s.get('name','?')}' fps {src_fps} "

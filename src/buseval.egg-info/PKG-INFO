@@ -749,7 +749,7 @@ buseval predict -t my.yaml
 
 ## Supported Estimators
 
-CAN (DBC) / CAN (load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH (NAND / eMMC / UFS) / ISP / NPU / GPU / Display
+CAN (DBC) / CAN (load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH (NAND / eMMC / UFS) / ISP / NPU / GPU / Display / VENC (H.264/H.265/AV1) / VDEC
 
 MIPI CSI / DSI support a `count` parameter for multi-stream multiplexing on one port
 (MIPI virtual channels VC0-3, or deserializer aggregation). `count: 4` models 4 cameras
@@ -758,18 +758,25 @@ the aggregate. Defaults to 1 (backward compatible).
 
 ## Pipeline Wiring (`source`) & ISP Stages
 
-Pipelines (ISP / NPU) can declare an optional `source` field naming a master
-(e.g. `CSI1`) whose image dimensions (width/height/fps/bpp/count) they inherit.
-The estimator recomputes the frame stream from those dimensions — no separate
-bandwidth field, users only ever edit width/height/fps. IPs that read directly
-from DDR (no CSI source) leave `source: null` and put width/height/fps/bpp
-directly in `params` (same effect).
+Pipelines (ISP / NPU / VENC / VDEC / Display) can declare an optional `source`
+field naming a master (e.g. `CSI1`) **or another pipeline** (e.g. `ISP0`) whose
+output they consume. This wires the data flow explicitly (pipeline-to-pipeline
+chaining supported via topological sort; cycles are rejected).
+
+- **master source** (e.g. `CSI0`): the pipeline inherits the master's image
+  dimensions (width/height/fps/bpp/count) and computes its own frame stream.
+- **pipeline source** (e.g. `ISP0`): the pipeline receives the upstream
+  pipeline's **output bandwidth** (write_bw) as its input — useful for
+  `ISP0→NPU0` (NPU reads ISP's YUV output), `ISP0→VENC0` (encode ISP output),
+  `ISP0→DISP0` (low-latency viewfinder path).
+- IPs that read directly from DDR (no source) leave `source: null` and put
+  width/height/fps/bpp directly in `params`.
 
 ```yaml
 pipelines:
   - name: ISP0
     type: isp
-    source: CSI1              # option: inherit width/height/fps/bpp/count from CSI1 (null = use params)
+    source: CSI1              # master → pipeline (inherit CSI1's dimensions)
     mode: serial              # serial = max of stages; parallel = sum
     stages:                   # fully customisable — name & factors are arbitrary
       - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
@@ -779,18 +786,33 @@ pipelines:
       - {name: custom_NR,  read_factor: 1.8, write_factor: 1.2}
       - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
     # each stage's DDR traffic = frame_stream × factor
+  - name: VENC0
+    type: venc                # encode ISP output for recording; codec = h264|h265|av1
+    source: ISP0              # p2p: VENC reads ISP0's YUV output
+    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
+  - name: VDEC0
+    type: vdec                # playback decoder (independent; no source)
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
   - name: NPU0
     type: npu
-    source: [CSI0, CSI1]      # option: multi-source — NPU reads both CSI0 (4-cam) and CSI1;
+    source: [CSI0, ISP0]      # multi-source: CSI0 raw-domain (4-cam) + ISP0 YUV output (p2p)
                               #   each source uses its NATIVE fps (no sync/cap),
                               #   input is the SUM of per-source MB/s (not fps),
                               #   weight + activation are computed once (shared model)
-    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
-    # DDR-direct input (no CSI): source: null + params: {width, height, fps, bpp, ...}
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8}
+  - name: DISP0
+    type: display
+    source: ISP0              # p2p: Display reads ISP0's YUV (low-latency path)
 ```
 
-All SoC presets ship with a default wiring (CSI1→ISP0, CSI0→NPU0) as a starting
-point; edit the YAML to match your board.
+All SoC presets ship with a default wiring (CSI1→ISP0→{NPU0, VENC0, DISP0}; NPU0
+also sources CSI0) as a starting point; edit the YAML to match your board.
+
+### Codec compression ratios (VENC / VDEC)
+
+`codec` selects a default compression ratio (configurable in
+`_coefficients.yaml`): h264=30, h265=50, av1=70. Override per instance with
+`params.compression_ratio: 40`.
 
 ## Supported SoC Presets
 

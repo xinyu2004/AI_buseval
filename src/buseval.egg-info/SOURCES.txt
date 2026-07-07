@@ -32,6 +32,7 @@ src/buseval/estimators/builtins/mipi.py
 src/buseval/estimators/builtins/npu.py
 src/buseval/estimators/builtins/spi.py
 src/buseval/estimators/builtins/usb.py
+src/buseval/estimators/builtins/venc_vdec.py
 src/buseval/presets/j5.yaml
 src/buseval/presets/orin_nx.yaml
 src/buseval/presets/rk3588.yaml

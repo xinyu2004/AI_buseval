@@ -58,7 +58,7 @@ buseval predict -t my.yaml
 
 ## 支持的估算器
 
-CAN(DBC) / CAN(load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH(NAND/eMMC/UFS) / ISP / NPU / GPU / Display
+CAN(DBC) / CAN(load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH(NAND/eMMC/UFS) / ISP / NPU / GPU / Display / VENC(H.264/H.265/AV1) / VDEC
 
 MIPI CSI / DSI 支持 `count` 参数，建模单端口多路复用（MIPI 虚拟通道 VC0-3，或解串器汇聚）。
 `count: 4` 表示一个 CSI 口接 4 路摄像头，做最坏情况带宽评估；lane 容量按聚合带宽检查。
@@ -66,37 +66,58 @@ MIPI CSI / DSI 支持 `count` 参数，建模单端口多路复用（MIPI 虚拟
 
 ## Pipeline 连线（`source`）与 ISP stages
 
-pipeline（ISP / NPU）可声明可选的 `source` 字段，指向某个 master（如 `CSI1`），
-继承其图像尺寸（width/height/fps/bpp/count）。estimator 用这些尺寸自己算帧流——
-没有单独的带宽字段，用户只改宽高/fps。直接从 DDR 读的 IP（无 CSI 源）保持
-`source: null`，把 width/height/fps/bpp 直接写在 `params` 里即可（效果一样）。
+pipeline（ISP / NPU / VENC / VDEC / Display）可声明可选的 `source` 字段，指向某个
+master（如 `CSI1`）**或另一个 pipeline**（如 `ISP0`）的输出。这样数据流显式可见
+（pipeline→pipeline 链式支持，按拓扑排序计算；环依赖会报错）。
+
+- **master 源**（如 `CSI0`）：pipeline 继承 master 的图像尺寸（width/height/fps/bpp/count），
+  自己算帧流。
+- **pipeline 源**（如 `ISP0`）：pipeline 拿到上游 pipeline 的**输出带宽**（write_bw）
+  作输入——用于 `ISP0→NPU0`（NPU 读 ISP 的 YUV 输出）、`ISP0→VENC0`（编码 ISP 输出）、
+  `ISP0→DISP0`（低延迟取景器通路）。
+- 直接从 DDR 读的 IP（无源）保持 `source: null`，把 width/height/fps/bpp 直接写在
+  `params` 里。
 
 ```yaml
 pipelines:
   - name: ISP0
     type: isp
-    source: CSI1              # option: 从 CSI1 继承 width/height/fps/bpp/count（null = 用 params）
+    source: CSI1              # master → pipeline（继承 CSI1 的尺寸）
     mode: serial              # serial = 各级取 max；parallel = 各级求和
     stages:                   # 完全可自定义 — 名称和系数任意
       - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
       # 厂商专有级 — 任意名称、任意系数：
-      - {name: 我的NR,     read_factor: 1.8, write_factor: 1.2}
+      - {name: custom_NR,  read_factor: 1.8, write_factor: 1.2}
       - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
     # 每级 DDR 流量 = frame_stream × factor
+  - name: VENC0
+    type: venc                # 编码 ISP 输出录像；codec = h264|h265|av1
+    source: ISP0              # p2p：VENC 读 ISP0 的 YUV 输出
+    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
+  - name: VDEC0
+    type: vdec                # 回放解码器（独立，无 source）
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
   - name: NPU0
     type: npu
-    source: [CSI0, CSI1]      # option: 多源 — NPU 分时读 CSI0（4 路）和 CSI1；
+    source: [CSI0, ISP0]      # 多源：CSI0 raw 域（4 路）+ ISP0 YUV 输出（p2p）
                               #   各源用原生 fps（不同步、不 cap），
                               #   input 是各源 MB/s 之和（不是 fps 之和），
                               #   weight + activation 只算一次（模型共享）
-    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8}
-    # DDR 直读输入（无 CSI）：source: null + params: {width, height, fps, bpp, ...}
+    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8}
+  - name: DISP0
+    type: display
+    source: ISP0              # p2p：Display 读 ISP0 的 YUV（低延迟通路）
 ```
 
-所有 SoC 预设默认带一条连线（CSI1→ISP0、CSI0→NPU0）作为起点，
-按你的板子在 YAML 里改即可。
+所有 SoC 预设默认带一条连线（CSI1→ISP0→{NPU0, VENC0, DISP0}；NPU0 同时也 source CSI0）
+作为起点，按你的板子在 YAML 里改即可。
+
+### 编码器压缩比（VENC / VDEC）
+
+`codec` 选默认压缩比（可在 `_coefficients.yaml` 配置）：h264=30、h265=50、av1=70。
+单条覆盖用 `params.compression_ratio: 40`。
 
 ## 支持的 SoC 预设
 

@@ -58,6 +58,22 @@ gpu:
 display:
   default_bpp: 32
 
+# VENC / VDEC
+venc:
+  default_bpp: 16              # YUV422
+  default_codec: h265
+  compression_ratios:
+    h264: 30
+    h265: 50
+    av1: 70
+vdec:
+  default_bpp: 16
+  default_codec: h265
+  compression_ratios:
+    h264: 30
+    h265: 50
+    av1: 70
+
 # DDR
 ddr:
   default_efficiency: 0.7

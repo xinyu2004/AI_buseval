@@ -21,9 +21,18 @@ pipelines:
       - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
+  - name: VENC0
+    type: venc
+    source: ISP0
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
+  - name: VDEC0
+    type: vdec
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
   - name: NPU0
     type: npu
-    source: CSI0              # option: NPU reads CSI0's 4-cam aggregate from DDR as inference input
+    source: [CSI0, ISP0]
     mode: parallel
     verify: true
     params: {params_mbytes: 60, activation_mbytes: 30, inference_fps: 30, tops_peak: 6, tops_used: 4}
@@ -33,8 +42,8 @@ pipelines:
     params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
   - name: DISP0
     type: display
+    source: ISP0
     verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 32}
 ddr_channels:
   - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # LPDDR4X 4266, 32-bit
 alert_thresholds: {yellow: 0.6, red: 0.8}

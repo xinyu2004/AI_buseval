@@ -294,22 +294,130 @@ def test_predict_source_not_found_errors():
         predict(topo)
 
 
-def test_lint_source_p2p_unsupported():
+def test_predict_p2p_isp_to_npu():
+    """p2p: NPU sources ISP0 → NPU's input includes ISP0's write_bw (YUV output)."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI1", type="mipi_csi",
+                        params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2})],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 2.0}]),
+            Pipeline(name="NPU0", type="npu", source="ISP0", mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    isp = next(i for i in result.items if i.name == "ISP0")
+    npu = next(i for i in result.items if i.name == "NPU0")
+    # NPU's input_frame_mbps should equal ISP0's write_bw (p2p passes upstream output)
+    assert abs(npu.breakdown["input_frame_mbps"] - isp.write_bw_mbps) < 1e-3
+
+
+def test_predict_p2p_mixed_master_and_pipeline_sources():
+    """NPU source=[CSI0, ISP0]: master contributes dims, pipeline contributes write_bw."""
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4}),
+                 Master(name="CSI1", type="mipi_csi",
+                        params={"width": 1280, "height": 720, "fps": 60, "bpp": 12, "lanes": 2})],
+        pipelines=[
+            Pipeline(name="ISP0", type="isp", source="CSI1", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 2.0}]),
+            Pipeline(name="NPU0", type="npu", source=["CSI0", "ISP0"], mode="parallel",
+                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0}),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    result = predict(topo)
+    npu = next(i for i in result.items if i.name == "NPU0")
+    isp = next(i for i in result.items if i.name == "ISP0")
+    # sources should contain both CSI0 (master, kind=master) and ISP0 (pipeline, kind=pipeline)
+    kinds = {s["name"]: s.get("kind") for s in npu.breakdown["sources"]}
+    assert kinds["CSI0"] == "master"
+    assert kinds["ISP0"] == "pipeline"
+    # CSI0 contributes 373.248 (master dims); ISP0 contributes its write_bw
+    csi0_input = next(s["input_mbps"] for s in npu.breakdown["sources"] if s["name"] == "CSI0")
+    isp0_input = next(s["input_mbps"] for s in npu.breakdown["sources"] if s["name"] == "ISP0")
+    assert abs(csi0_input - 373.248) < 1e-3
+    assert abs(isp0_input - isp.write_bw_mbps) < 1e-3
+
+
+def test_predict_p2p_cyclic_dependency_errors():
+    """A→B→A cycle raises ValueError."""
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
     topo = Topology(
         masters=[Master(name="CSI0", type="mipi_csi",
                         params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})],
         pipelines=[
-            Pipeline(name="ISP0", type="isp", mode="serial",
-                     params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12},
+            Pipeline(name="A", type="isp", source="B", mode="serial",
                      stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
-            Pipeline(name="NPU0", type="npu", source="ISP0",
-                     params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 10, "tops_peak": 0}),
+            Pipeline(name="B", type="isp", source="A", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+        ],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+    )
+    with pytest.raises(ValueError, match="cyclic"):
+        predict(topo)
+
+
+def test_lint_source_cyclic():
+    from buseval.schema import Master, DDRChannel, Pipeline, Topology
+    topo = Topology(
+        masters=[Master(name="CSI0", type="mipi_csi",
+                        params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})],
+        pipelines=[
+            Pipeline(name="A", type="isp", source="B", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
+            Pipeline(name="B", type="isp", source="A", mode="serial",
+                     stages=[{"name": "x", "read_factor": 1.0, "write_factor": 1.0}]),
         ],
         ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
     )
     issues = lint(topo)
-    assert any(i.rule == "source-pipeline" for i in issues)
+    assert any(i.rule == "source-cyclic" for i in issues)
+
+
+def test_venc_estimator_h265():
+    from buseval.estimators.registry import get_estimator
+    est = get_estimator("venc")
+    r = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 16, "codec": "h265"})
+    # raw = 1920*1080*30*16/8/1e6 = 124.416 MB/s; write = 124.416/50 = 2.488
+    assert abs(r.read_bw_mbps - 124.416) < 1e-3
+    assert abs(r.write_bw_mbps - 124.416 / 50) < 1e-3
+    assert "h265" in r.dominant_factor
+
+
+def test_venc_estimator_h264_higher_bitrate():
+    from buseval.estimators.registry import get_estimator
+    est = get_estimator("venc")
+    r = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 16, "codec": "h264"})
+    # h264 ratio=30 → write = 124.416/30 = 4.147 (more than h265's 2.488)
+    assert r.write_bw_mbps > 4.0
+
+
+def test_vdec_estimator_reverse_of_venc():
+    from buseval.estimators.registry import get_estimator
+    est = get_estimator("vdec")
+    r = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 16, "codec": "h265"})
+    # VDEC: read = bitstream (small) = 124.416/50; write = YUV (large) = 124.416
+    assert abs(r.write_bw_mbps - 124.416) < 1e-3
+    assert abs(r.read_bw_mbps - 124.416 / 50) < 1e-3
+
+
+def test_venc_with_pipeline_source_input_stream():
+    """VENC sourced from ISP0: uses upstream's write_bw as raw frame input."""
+    from buseval.estimators.registry import get_estimator
+    est = get_estimator("venc")
+    r = est.estimate({
+        "source_input_mbps": 165.89, "source": "ISP0",
+        "codec": "h265",
+    })
+    assert abs(r.read_bw_mbps - 165.89) < 1e-3
+    assert abs(r.write_bw_mbps - 165.89 / 50) < 1e-3
+    assert "ISP0" in r.dominant_factor
 
 
 def test_lint_source_override_warns():

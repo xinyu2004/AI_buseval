@@ -20,9 +20,18 @@ pipelines:
       - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
       - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
       - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
+  - name: VENC0
+    type: venc                # option: encode ISP output for recording. codec = h264|h265|av1
+    source: ISP0              # p2p: VENC reads ISP0's YUV output (upstream write_bw)
+    verify: true
+    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
+  - name: VDEC0
+    type: vdec                # playback decoder (independent; no source)
+    verify: true
+    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
   - name: NPU0
     type: npu
-    source: [CSI0, CSI1]       # option: multi-source — NPU reads both CSI0 (4-cam) and CSI1; each source's native fps, no sync
+    source: [CSI0, ISP0]      # multi-source: CSI0 raw-domain (4-cam) + ISP0 YUV output (p2p)
     mode: parallel
     verify: true
     params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8, tops_used: 6}
@@ -32,8 +41,8 @@ pipelines:
     params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
   - name: DISP0
     type: display
+    source: ISP0              # p2p: Display reads ISP0's YUV output (EVS / viewfinder low-latency path)
     verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 32}
 ddr_channels:
   - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # LPDDR4 4266, 32-bit
 alert_thresholds: {yellow: 0.6, red: 0.8}

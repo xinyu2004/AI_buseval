@@ -91,21 +91,24 @@ def lint(topology: Topology) -> list[LintIssue]:
                     LintIssue("error", "param-range", f"{m.name}: unknown USB version '{v}'")
                 )
 
-    # Pipeline `source` validation (source may be str or list[str])
+    # Pipeline `source` validation (source may be str or list[str]; may reference
+    # masters OR other pipelines — p2p chaining is supported via topological sort.)
     master_by_name = {m.name: m for m in topology.masters}
+    pipeline_by_name = {p.name: p for p in topology.pipelines}
+    # Detect cyclic pipeline dependencies.
+    cycle = _detect_cycle(topology.pipelines)
+    if cycle:
+        issues.append(
+            LintIssue(
+                "error",
+                "source-cyclic",
+                f"cyclic pipeline dependency: {' -> '.join(cycle)}",
+            )
+        )
     for p in enabled_pipelines:
-        # Normalize source to a list
-        if p.source is None:
-            src_list = []
-        elif isinstance(p.source, str):
-            src_list = [p.source]
-        else:
-            src_list = list(p.source)
-
+        src_list = _norm_source(p.source)
         if not src_list:
             continue
-
-        # ISP does not support multi-source
         if p.type == "isp" and len(src_list) > 1:
             issues.append(
                 LintIssue(
@@ -115,24 +118,25 @@ def lint(topology: Topology) -> list[LintIssue]:
                 )
             )
             continue
-
         for sname in src_list:
-            if sname in pipeline_names:
-                issues.append(
-                    LintIssue(
-                        "error",
-                        "source-pipeline",
-                        f"pipeline '{p.name}': source '{sname}' references another pipeline; "
-                        f"pipeline-to-pipeline chaining is not supported yet.",
+            if sname in pipeline_by_name:
+                upstream = pipeline_by_name[sname]
+                if not upstream.enabled:
+                    issues.append(
+                        LintIssue(
+                            "warning",
+                            "source-pipeline-disabled",
+                            f"pipeline '{p.name}': source '{sname}' is disabled; "
+                            f"downstream will see zero output from it.",
+                        )
                     )
-                )
-                continue
+                continue  # p2p is OK
             if sname not in master_names:
                 issues.append(
                     LintIssue(
                         "error",
                         "source-not-found",
-                        f"pipeline '{p.name}': source '{sname}' not found among masters.",
+                        f"pipeline '{p.name}': source '{sname}' not found among masters or pipelines.",
                     )
                 )
                 continue
@@ -145,8 +149,6 @@ def lint(topology: Topology) -> list[LintIssue]:
                         f"params.width/height/fps will be ignored.",
                     )
                 )
-            # NPU: warn per-source if inference_fps < source fps (async, not capped,
-            # but worth flagging — NPU infers slower than frames arrive for that source)
             if p.type == "npu":
                 inf_fps = p.params.get("inference_fps")
                 src_master = master_by_name.get(sname)
@@ -163,3 +165,43 @@ def lint(topology: Topology) -> list[LintIssue]:
                     )
 
     return issues
+
+
+def _norm_source(source) -> list[str]:
+    if source is None:
+        return []
+    if isinstance(source, str):
+        return [source]
+    return list(source)
+
+
+def _detect_cycle(pipelines) -> list[str] | None:
+    """Return a cycle path (list of names) if any, else None. DFS-based."""
+    by_name = {p.name: p for p in pipelines}
+    visited: dict[str, int] = {}
+
+    def visit(name: str, stack: list[str]) -> list[str] | None:
+        state = visited.get(name)
+        if state == 1:
+            return None
+        if state == 0:
+            idx = stack.index(name) if name in stack else 0
+            return stack[idx:] + [name]
+        visited[name] = 0
+        stack.append(name)
+        p = by_name.get(name)
+        if p:
+            for s in _norm_source(p.source):
+                if s in by_name:
+                    cyc = visit(s, stack)
+                    if cyc:
+                        return cyc
+        stack.pop()
+        visited[name] = 1
+        return None
+
+    for p in pipelines:
+        cyc = visit(p.name, [])
+        if cyc:
+            return cyc
+    return None
