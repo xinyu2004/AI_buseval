@@ -118,7 +118,7 @@ def register(type_name: str): ...
 def get_estimator(type_name: str) -> Estimator: ...
 ```
 
-- 内置 13 个估算器，import 时自动注册
+- 内置 14 个估算器，import 时自动注册
 - 用户自定义：`@register("my_ip")`
 - 系数集中在 `estimators/_coefficients.yaml`
 
@@ -164,7 +164,7 @@ def get_estimator(type_name: str) -> Estimator: ...
 
 ### DDR 有效带宽（木桶效应）
 ```
-controller_peak = controller_mt_s × controller_width_bits / 8
+controller_peak = controller_mt_s × controller_width_bits / 8 × controller_groups
 module_peak     = module_mt_s     × module_width_bits     / 8 × module_groups
 effective_peak  = min(controller_peak, module_peak)                  ← 瓶颈取短板
 available       = effective_peak × efficiency
@@ -201,6 +201,41 @@ available       = effective_peak × efficiency
 - 最坏帧延迟估算：`延迟 ≈ (最坏仲裁 + 最长报文传输) / (1 - 负载率)`
 - 过载建议：>0.7 → 升级 bitrate / 拆分总线；>0.9 → 必须重构
 - 支持 CAN-FD：`--can-bitrate 2000`（2Mbps），DBC 内 64 字节大帧自动处理
+
+## 10.5. GMSL 链路带宽（独立工具）
+
+独立于 SoC topology，计算 GMSL 串行链路所需带宽。
+
+### 公式
+```
+link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
+          ÷ 1e6 → Mbps
+```
+- blanking 默认 1.2（20% 消隐，乘数形式）
+- encoding_factor 默认 1.15（8b/10b + 压缩有效近似）
+- overhead_factor 默认 1.067（FEC + 头 + 校验）
+- 三个系数在 `_coefficients.yaml` 的 `gmsl:` 段，可校准
+
+### GMSL 链路等级推荐
+| 等级 | 带宽 |
+|---|---|
+| GMSL1 | 1.5 Gbps |
+| GMSL2 | 3.0 Gbps |
+| GMSL3 | 6.0 Gbps |
+
+每路显示推导明细（像素率→+blanking→+encoding→+overhead），对比三个等级标注 util% 和 ✓/✗，推荐最小满足等级（Best fit）。多路时汇总表显示 total + aggregate best fit（total 带宽 vs tier 容量）。
+
+### CLI
+```bash
+# 单路（参数串，空格分隔 key=value）
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12 blanking=1.25
+
+# 多路（YAML）
+buseval predict --GMSL examples/gmsl_links.yaml
+```
+- 含 `=` → 参数串；不含 `=` → YAML 文件（自动区分）
+- blanking 是全局的（YAML 顶部 `blanking: 1.25` 覆盖所有路，不每路重复）
 
 ## 11. SoC 预设
 
@@ -274,6 +309,8 @@ buseval predict --soc <chip>                   # 预设评估
 buseval predict --soc <chip> --dbc f.dbc       # DBC 注入第一个 CAN 槽
 buseval predict --soc <chip> \
     --can-dbc CAN0=a.dbc --can-dbc CAN2=b.dbc  # 多 CAN 通路分别挂 DBC
+buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12  # GMSL 单路
+buseval predict --GMSL examples/gmsl_links.yaml              # GMSL 多路
 buseval predict -t my.yaml                     # 自配
 buseval lint -t my.yaml
 buseval list presets                           # 列预设
@@ -313,6 +350,9 @@ src/buseval/
 ├── dbc/
 │   ├── parser.py
 │   └── health_report.py
+├── gmsl/
+│   ├── calculator.py       # GMSL 链路带宽公式 + 推荐表
+│   └── report.py           # GMSL 终端 + 结构化报告
 ├── presets/
 │   ├── tda4vh.yaml
 │   ├── orin_nx.yaml
@@ -327,6 +367,7 @@ src/buseval/
 examples/
 ├── sample.dbc              # classic CAN，10 条小报文
 ├── sample_heavy.dbc        # CAN-FD，17 条 64 字节大帧
+├── gmsl_links.yaml         # GMSL 多路配置示例
 └── full_menu.yaml          # 完整菜单模板
 tests/
 └── ...

@@ -39,7 +39,8 @@ masters:
     params: {width: 1280, height: 720, fps: 60, bpp: 12, lanes: 2, count: 4}
 
   - name: DSI0
-    type: mipi_dsi
+    type: mipi_dsi            # option: standalone (fills width/height/fps below) OR
+                              #   pipeline with source: DISP0 (p2p, inherits Display output)
     enabled: false
     verify: true
     params: {width: 1920, height: 1080, fps: 60, bpp: 24, lanes: 4, count: 4}
