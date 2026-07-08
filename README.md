@@ -71,28 +71,6 @@ buseval predict -t my.yaml
 - **Phase 3** — Prediction vs. measurement comparison + attribution chain + `scenario diff`
 - **Phase 4** — Coefficient self-calibration + Web UI
 
-## GMSL Link Bandwidth
-
-Independent tool (not part of SoC topology). Calculates the GMSL serial link
-bandwidth required for a given camera resolution:
-
-```
-link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
-```
-
-Coefficients (blanking=1.2, encoding=1.15, overhead=1.067) are in
-`_coefficients.yaml` and can be overridden per call. A GMSL1/2/3 recommendation
-table (1.5 / 3 / 6 Gbps) is printed with per-link util and best-fit tier.
-
-```bash
-# single link
-buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
-buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12 blanking=1.25
-
-# multi-link YAML (blanking can be set globally at the top)
-buseval predict --GMSL examples/gmsl_links.yaml
-```
-
 ## Supported Estimators
 
 CAN (DBC) / CAN (load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH (NAND / eMMC / UFS) / ISP / NPU / GPU / Display / VENC (H.264/H.265/AV1) / VDEC

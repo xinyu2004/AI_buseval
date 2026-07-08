@@ -71,26 +71,6 @@ buseval predict -t my.yaml
 - **Phase 3**：预测 vs 实测对比 + 归因链 + `scenario diff`
 - **Phase 4**：系数自校准 + Web UI
 
-## GMSL 链路带宽
-
-独立工具（不属于 SoC topology）。计算给定摄像头分辨率下 GMSL 串行链路所需带宽：
-
-```
-link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
-```
-
-系数（blanking=1.2, encoding=1.15, overhead=1.067）在 `_coefficients.yaml` 中，
-可按调用覆盖。输出含 GMSL1/2/3 推荐表（1.5 / 3 / 6 Gbps），标注每路利用率和最佳匹配等级。
-
-```bash
-# 单路
-buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
-buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12 blanking=1.25
-
-# 多路 YAML（blanking 可在文件顶部全局设置）
-buseval predict --GMSL examples/gmsl_links.yaml
-```
-
 ## 支持的估算器
 
 CAN(DBC) / CAN(load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH(NAND/eMMC/UFS) / ISP / NPU / GPU / Display / VENC(H.264/H.265/AV1) / VDEC
