@@ -43,6 +43,11 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
         lanes = int(params.get("lanes", 1))
         lane_cap_key = "dsi_lane_capacity_gbps" if is_dsi else "lane_capacity_gbps"
         lane_cap_mbps = lanes * coeffs[lane_cap_key] * 1e9 / 8.0 / 1e6
+        # DSI p2p: data comes from upstream (Display), but DSI controller still
+        # reads descriptors/config from DDR (~2% of carried bandwidth).
+        ctrl_overhead = float(coeffs.get("control_overhead_pct", 0.02))
+        ddr_read = carried_mbps * ctrl_overhead if is_dsi else 0.0
+        ddr_write = carried_mbps * ctrl_overhead if not is_dsi else 0.0
 
         assumptions = []
         if carried_mbps > lane_cap_mbps:
@@ -52,8 +57,8 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
             )
 
         return BandwidthEstimate(
-            read_bw_mbps=0.0,   # no DDR read — upstream (Display) already counts
-            write_bw_mbps=0.0,  # no DDR write — data goes to panel via p2p
+            read_bw_mbps=round(ddr_read, 4),   # small descriptor/config read from DDR
+            write_bw_mbps=round(ddr_write, 4),  # small descriptor/config write to DDR
             breakdown={
                 "kind": kind,
                 "mode": "p2p",
@@ -91,11 +96,13 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
             f"{lanes}-lane capacity {lane_cap_mbps:.1f} MB/s"
         )
 
-    # CSI = input to DDR (write); DSI = output from DDR (read)
+    # CSI = input to DDR (write dominant); DSI = output from DDR (read dominant)
+    # Both also have a small control/descriptor overhead in the opposite direction (~2%).
+    ctrl_overhead = float(coeffs.get("control_overhead_pct", 0.02))
     if is_dsi:
-        read_bw, write_bw = aggregate_mbps, 0.0
+        read_bw, write_bw = aggregate_mbps, aggregate_mbps * ctrl_overhead
     else:
-        read_bw, write_bw = 0.0, aggregate_mbps
+        read_bw, write_bw = aggregate_mbps * ctrl_overhead, aggregate_mbps
 
     if count > 1:
         dominant = f"{count}x {w}x{h}@{fps}fps×{bpp}bpp ({lanes} lanes, {count} streams)"

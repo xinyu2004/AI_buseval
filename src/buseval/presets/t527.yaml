@@ -44,7 +44,8 @@ pipelines:
 ddr_channels:
   - name: DDR0
     controller_mt_s: 3200           # T527 LPDDR4 controller supports up to 3200 MT/s
-    controller_width_bits: 32       # 32-bit bus
+    controller_width_bits: 32       # 32-bit per group
+    controller_groups: 1            # 1×32-bit = 32-bit effective
     controller_type: LPDDR4
     module_mt_s: 3200               # external LPDDR4-3200 module
     module_width_bits: 32

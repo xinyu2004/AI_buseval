@@ -603,9 +603,8 @@ def test_venc_with_pipeline_source_input_stream():
     assert "ISP0" in r.dominant_factor
 
 
-def test_predict_dsi_sources_display_zero_ddr():
-    """DSI p2p from Display: DSI carries Display's read_bw, but DSI's own DDR=0
-    (Display already counts the framebuffer read). Lane capacity is validated."""
+def test_predict_dsi_sources_display_small_ddr():
+    """DSI p2p from Display: DSI carries Display's read_bw, small DDR from descriptor overhead."""
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
     topo = Topology(
         masters=[Master(name="CSI1", type="mipi_csi",
@@ -624,9 +623,9 @@ def test_predict_dsi_sources_display_zero_ddr():
     dsi = next(i for i in result.items if i.name == "DSI0")
     # DSI carries Display's read_bw
     assert abs(dsi.breakdown["carried_mbps"] - disp.read_bw_mbps) < 1e-3
-    # DSI adds zero DDR traffic (Display already counts)
-    assert dsi.read_bw_mbps == 0.0
-    assert dsi.write_bw_mbps == 0.0
+    # DSI has small DDR read (descriptor overhead ~2%), not zero
+    assert dsi.read_bw_mbps > 0
+    assert dsi.read_bw_mbps < 10  # small
     # Lane capacity checked
     assert dsi.breakdown["lane_capacity_mbps"] == 750.0
 

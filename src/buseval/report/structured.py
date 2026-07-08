@@ -53,6 +53,7 @@ def _margin_to_dict(m) -> dict:
         "name": m.name,
         "controller_mt_s": m.controller_mt_s,
         "controller_width_bits": m.controller_width_bits,
+        "controller_groups": m.controller_groups,
         "controller_type": m.controller_type,
         "controller_peak_mbps": m.controller_peak_mbps,
         "module_mt_s": m.module_mt_s,

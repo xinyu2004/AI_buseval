@@ -134,11 +134,14 @@ ddr_channels:
   - name: DDR0
     # chip DDR controller (from SoC datasheet)
     controller_mt_s: 4266           # max MT/s the controller supports
-    controller_width_bits: 32       # bus width in bits
-    # external DRAM module (from module datasheet)
+    controller_width_bits: 32       # bus width per group in bits
+    controller_groups: 4            # number of groups (e.g., 4×32-bit = 128-bit effective)
+    controller_type: LPDDR4
+    # external DRAM module (from module datasheet / board BOM)
     module_mt_s: 3200               # module rated speed
-    module_width_bits: 32           # module bus width
-    module_groups: 1                # number of groups (ranks / chip selects)
+    module_width_bits: 32           # module bus width per group
+    module_groups: 4               # number of groups (ranks / chip selects)
+    module_type: LPDDR4
     # common
     efficiency: 0.7                 # usable fraction after refresh / row miss / etc.
     read_write_ratio: null          # null = symmetric (0.5/0.5)

@@ -17,6 +17,7 @@ class ChannelMargin:
     # raw params (for detailed reporting)
     controller_mt_s: float
     controller_width_bits: int
+    controller_groups: int
     controller_type: str
     module_mt_s: float
     module_width_bits: int
@@ -48,7 +49,9 @@ def _compute_peaks(ch: DDRChannel) -> tuple[float, float, float, str]:
     """
     if ch.controller_mt_s is not None and ch.module_mt_s is not None:
         # MT/s already includes DDR double data rate — no ×2 needed.
-        ctrl = ch.controller_mt_s * (ch.controller_width_bits or 32) / 8.0
+        # controller_groups and module_groups model multi-rank / multi-channel configs
+        # (e.g., 4×32-bit controller = 128-bit effective with controller_groups=4).
+        ctrl = ch.controller_mt_s * (ch.controller_width_bits or 32) / 8.0 * ch.controller_groups
         mod = ch.module_mt_s * (ch.module_width_bits or 32) / 8.0 * ch.module_groups
         eff = min(ctrl, mod)
         if ctrl < mod:
@@ -98,6 +101,7 @@ def evaluate_margin(prediction: PredictionResult) -> list[ChannelMargin]:
                 name=ch.name,
                 controller_mt_s=ch.controller_mt_s or 0,
                 controller_width_bits=ch.controller_width_bits or 0,
+                controller_groups=ch.controller_groups,
                 controller_type=ch.controller_type or "",
                 module_mt_s=ch.module_mt_s or 0,
                 module_width_bits=ch.module_width_bits or 0,

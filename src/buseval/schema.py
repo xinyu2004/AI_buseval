@@ -71,6 +71,7 @@ class DDRChannel(BaseModel):
     # Physical params — chip DDR controller (SoC internal, fixed)
     controller_mt_s: Optional[float] = None
     controller_width_bits: Optional[int] = None
+    controller_groups: int = 1                # e.g., 4×32-bit controller = 128-bit effective
     controller_type: Optional[str] = None    # LPDDR4 / LPDDR4X / LPDDR5 / DDR4 etc. (display only)
     # Physical params — external DRAM module (board design choice)
     module_mt_s: Optional[float] = None

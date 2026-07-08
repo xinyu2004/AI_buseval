@@ -98,19 +98,24 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
             mod_gb = m.module_peak_mbps / 1000
             eff_gb = m.effective_peak_mbps / 1000
             avail_gb = m.available_mbps / 1000
+            ctrl_formula = f"{m.controller_mt_s:.0f} × {m.controller_width_bits} / 8"
+            if m.controller_groups > 1:
+                ctrl_formula += f" × {m.controller_groups}"
+            mod_formula = f"{m.module_mt_s:.0f} × {m.module_width_bits} / 8"
+            if m.module_groups > 1:
+                mod_formula += f" × {m.module_groups}"
             lines = [
                 "  [Chip] DDR Controller (SoC internal, fixed)",
                 f"    Speed:           {m.controller_mt_s:.0f} MT/s",
-                f"    Bus width:       {m.controller_width_bits} bit",
+                f"    Bus width:       {m.controller_width_bits} bit" + (f" × {m.controller_groups} groups" if m.controller_groups > 1 else ""),
                 f"    Type:            {m.controller_type or 'n/a'}",
-                f"    Peak bandwidth:  {m.controller_mt_s:.0f} × {m.controller_width_bits} / 8 = {m.controller_peak_mbps:,.0f} MB/s ({ctrl_gb:.1f} GB/s)",
+                f"    Peak bandwidth:  {ctrl_formula} = {m.controller_peak_mbps:,.0f} MB/s ({ctrl_gb:.1f} GB/s)",
                 "",
                 "  [Onboard] DRAM Module (external, board design choice)",
                 f"    Speed:           {m.module_mt_s:.0f} MT/s",
-                f"    Bus width:       {m.module_width_bits} bit",
-                f"    Groups:          {m.module_groups}",
+                f"    Bus width:       {m.module_width_bits} bit" + (f" × {m.module_groups} groups" if m.module_groups > 1 else ""),
                 f"    Type:            {m.module_type or 'n/a'}",
-                f"    Peak bandwidth:  {m.module_mt_s:.0f} × {m.module_width_bits} / 8 × {m.module_groups} = {m.module_peak_mbps:,.0f} MB/s ({mod_gb:.1f} GB/s)",
+                f"    Peak bandwidth:  {mod_formula} = {m.module_peak_mbps:,.0f} MB/s ({mod_gb:.1f} GB/s)",
                 "",
                 "  [Effective]",
                 f"    Effective peak:  min({m.controller_peak_mbps:,.0f}, {m.module_peak_mbps:,.0f}) = {m.effective_peak_mbps:,.0f} MB/s ({eff_gb:.1f} GB/s)",

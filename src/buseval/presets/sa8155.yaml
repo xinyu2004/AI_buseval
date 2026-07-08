@@ -39,11 +39,12 @@ pipelines:
 ddr_channels:
   - name: DDR0
     controller_mt_s: 4266           # SA8155 LPDDR4X controller supports up to 4266 MT/s
-    controller_width_bits: 64       # 64-bit bus
+    controller_width_bits: 32       # 32-bit per group
+    controller_groups: 2            # 2×32-bit = 64-bit effective
     controller_type: LPDDR4X
     module_mt_s: 4266               # external LPDDR4X-4266 module
-    module_width_bits: 64
-    module_groups: 1
+    module_width_bits: 32
+    module_groups: 2
     module_type: LPDDR4X
     efficiency: 0.7
 alert_thresholds: {yellow: 0.6, red: 0.8}

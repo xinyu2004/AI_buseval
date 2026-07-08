@@ -45,11 +45,12 @@ pipelines:
 ddr_channels:
   - name: DDR0
     controller_mt_s: 4266           # J5 LPDDR4X controller supports up to 4266 MT/s
-    controller_width_bits: 128      # 128-bit bus
+    controller_width_bits: 32       # 32-bit per group
+    controller_groups: 4            # 4×32-bit = 128-bit effective
     controller_type: LPDDR4X
     module_mt_s: 3200               # external LPDDR4X-3200 module
-    module_width_bits: 128
-    module_groups: 1
+    module_width_bits: 32
+    module_groups: 4
     module_type: LPDDR4X
     efficiency: 0.7
 alert_thresholds: {yellow: 0.6, red: 0.8}

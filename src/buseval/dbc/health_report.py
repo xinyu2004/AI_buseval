@@ -65,7 +65,7 @@ def build_health_report(dbc_path: str, bitrate_kbps: float | None = None) -> Hea
                 "bps": round(m.bps, 1),
                 "share_pct": round((m.bps / b.total_bps * 100) if b.total_bps else 0.0, 2),
             }
-            for m in b.messages[:10]
+            for m in b.messages  # show all messages (not just top 10)
         ]
 
         latency = _worst_case_latency(b)
