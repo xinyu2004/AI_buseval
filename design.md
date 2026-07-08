@@ -162,8 +162,20 @@ def get_estimator(type_name: str) -> Estimator: ...
 
 ## 8. Margin 评估
 
-- `available_R = peak × efficiency × read_ratio`
-- `available_W = peak × efficiency × write_ratio`
+### DDR 有效带宽（木桶效应）
+```
+controller_peak = controller_mt_s × controller_width_bits / 8
+module_peak     = module_mt_s     × module_width_bits     / 8 × module_groups
+effective_peak  = min(controller_peak, module_peak)                  ← 瓶颈取短板
+available       = effective_peak × efficiency
+```
+- MT/s 已包含 DDR 双沿（Double Data Rate），不再乘 2
+- 芯片 DDR 控制器上限 vs 外贴颗粒带宽，取最小值
+- bottleneck 标注："controller" / "module" / "matched"
+- 向后兼容：只写 `theoretical_peak_mbps` 时 effective = theoretical（旧行为）
+
+### 利用率与告警
+- `available_R = available × read_ratio`，`available_W = available × (1 - read_ratio)`
 - `util_R = R_demand / available_R`，`util_W` 同理
 - 告警：`util ≥ red(0.8)` → CRITICAL；`≥ yellow(0.6)` → WARN；否则 OK
 - R/W 失衡：`|util_R - util_W| / max(...)` > 0.3 标记 IMBALANCE

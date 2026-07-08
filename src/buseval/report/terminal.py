@@ -91,10 +91,40 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
     console = console or Console(no_color=not use_color, highlight=False)
     margins = evaluate_margin(prediction)
 
+    # DDR detail panel (controller vs module vs effective)
+    for m in margins:
+        if m.bottleneck != "n/a":
+            ctrl_gb = m.controller_peak_mbps / 1000
+            mod_gb = m.module_peak_mbps / 1000
+            eff_gb = m.effective_peak_mbps / 1000
+            avail_gb = m.available_mbps / 1000
+            lines = [
+                "  [Chip] DDR Controller (SoC internal, fixed)",
+                f"    Speed:           {m.controller_mt_s:.0f} MT/s",
+                f"    Bus width:       {m.controller_width_bits} bit",
+                f"    Type:            {m.controller_type or 'n/a'}",
+                f"    Peak bandwidth:  {m.controller_mt_s:.0f} × {m.controller_width_bits} / 8 = {m.controller_peak_mbps:,.0f} MB/s ({ctrl_gb:.1f} GB/s)",
+                "",
+                "  [Onboard] DRAM Module (external, board design choice)",
+                f"    Speed:           {m.module_mt_s:.0f} MT/s",
+                f"    Bus width:       {m.module_width_bits} bit",
+                f"    Groups:          {m.module_groups}",
+                f"    Type:            {m.module_type or 'n/a'}",
+                f"    Peak bandwidth:  {m.module_mt_s:.0f} × {m.module_width_bits} / 8 × {m.module_groups} = {m.module_peak_mbps:,.0f} MB/s ({mod_gb:.1f} GB/s)",
+                "",
+                "  [Effective]",
+                f"    Effective peak:  min({m.controller_peak_mbps:,.0f}, {m.module_peak_mbps:,.0f}) = {m.effective_peak_mbps:,.0f} MB/s ({eff_gb:.1f} GB/s)",
+                f"    Bottleneck:      {m.bottleneck}",
+                f"    Efficiency:      {m.efficiency}",
+                f"    Available:       {m.effective_peak_mbps:,.0f} × {m.efficiency} = {m.available_mbps:,.0f} MB/s ({avail_gb:.1f} GB/s)",
+            ]
+            console.print(Panel("\n".join(lines), title=f"{m.name} — DDR Configuration",
+                                border_style="blue"))
+
     # DDR margin table
     t = Table(title="DDR Bandwidth Report", show_lines=False)
     t.add_column("Channel")
-    t.add_column("Peak MB/s", justify="right")
+    t.add_column("Eff Peak", justify="right")
     t.add_column("Avail MB/s", justify="right")
     t.add_column("R-demand", justify="right")
     t.add_column("R-util", justify="right")
@@ -107,7 +137,7 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
         color = _VERDICT_COLOR.get(m.verdict, "white")
         t.add_row(
             m.name,
-            f"{m.peak_mbps:,.0f}",
+            f"{m.effective_peak_mbps:,.0f}",
             f"{m.available_mbps:,.0f}",
             f"{m.read_demand_mbps:,.0f}",
             f"{m.read_util*100:.1f}%",

@@ -50,10 +50,34 @@ class Pipeline(BaseModel):
 
 
 class DDRChannel(BaseModel):
-    """A DDR channel (one controller / one rank)."""
+    """A DDR channel (one controller / one rank).
+
+    Two ways to declare bandwidth:
+      1. Physical params (recommended): controller_mt_s × controller_width_bits
+         for the chip's DDR IP, and module_mt_s × module_width_bits × module_groups
+         for the external DRAM. The engine computes:
+           controller_peak = controller_mt_s × controller_width_bits / 8
+           module_peak     = module_mt_s     × module_width_bits     / 8 × module_groups
+           effective_peak  = min(controller_peak, module_peak)
+         (MT/s already includes DDR double data rate; ÷8 bits→bytes)
+      2. Legacy shorthand: theoretical_peak_mbps (assumes controller = module = this value).
+
+    Both cannot be mixed; if physical params are present, theoretical_peak is ignored.
+    """
 
     name: str
-    theoretical_peak_mbps: float
+    # Legacy shorthand
+    theoretical_peak_mbps: Optional[float] = None
+    # Physical params — chip DDR controller (SoC internal, fixed)
+    controller_mt_s: Optional[float] = None
+    controller_width_bits: Optional[int] = None
+    controller_type: Optional[str] = None    # LPDDR4 / LPDDR4X / LPDDR5 / DDR4 etc. (display only)
+    # Physical params — external DRAM module (board design choice)
+    module_mt_s: Optional[float] = None
+    module_width_bits: Optional[int] = None
+    module_groups: int = 1
+    module_type: Optional[str] = None        # display only
+    # Common
     efficiency: float = 0.7
     read_write_ratio: Optional[float] = Field(
         default=None,

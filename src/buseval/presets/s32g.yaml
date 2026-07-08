@@ -24,5 +24,13 @@ pipelines:
     verify: true
     params: {width: 1280, height: 720, fps: 30, bpp: 32}
 ddr_channels:
-  - {name: DDR0, theoretical_peak_mbps: 25600, efficiency: 0.7}  # DDR4 3200, 32-bit
+  - name: DDR0
+    controller_mt_s: 3200           # S32G DDR4 controller supports up to 3200 MT/s
+    controller_width_bits: 64       # 64-bit bus (2× 32-bit channels combined)
+    controller_type: DDR4
+    module_mt_s: 3200               # external DDR4-3200 module
+    module_width_bits: 64
+    module_groups: 1
+    module_type: DDR4
+    efficiency: 0.7
 alert_thresholds: {yellow: 0.6, red: 0.8}

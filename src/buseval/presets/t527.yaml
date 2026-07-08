@@ -42,5 +42,13 @@ pipelines:
     verify: true
     params: {lanes: 4}
 ddr_channels:
-  - {name: DDR0, theoretical_peak_mbps: 12800, efficiency: 0.7}  # LPDDR4 3200, 32-bit
+  - name: DDR0
+    controller_mt_s: 3200           # T527 LPDDR4 controller supports up to 3200 MT/s
+    controller_width_bits: 32       # 32-bit bus
+    controller_type: LPDDR4
+    module_mt_s: 3200               # external LPDDR4-3200 module
+    module_width_bits: 32
+    module_groups: 1
+    module_type: LPDDR4
+    efficiency: 0.7
 alert_thresholds: {yellow: 0.6, red: 0.8}

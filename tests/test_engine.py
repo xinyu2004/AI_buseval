@@ -362,6 +362,106 @@ def test_topology_hash_differs_for_different_topology():
     assert h1 != h2
 
 
+def test_ddr_effective_peak_min_controller_and_module():
+    """effective_peak = min(controller_peak, module_peak). MT/s already includes DDR."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(
+            name="DDR0",
+            controller_mt_s=4266, controller_width_bits=128,   # controller = 68256
+            module_mt_s=3200, module_width_bits=128,            # module = 51200
+            module_groups=1, efficiency=0.7,
+        )],
+    )
+    result = predict(topo)
+    margins = evaluate_margin(result)
+    m = margins[0]
+    assert m.controller_peak_mbps == 68256
+    assert m.module_peak_mbps == 51200
+    assert m.effective_peak_mbps == 51200  # min
+    assert m.bottleneck == "module"
+
+
+def test_ddr_bottleneck_controller_when_module_faster():
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(
+            name="DDR0",
+            controller_mt_s=3200, controller_width_bits=32,   # controller = 12800
+            module_mt_s=4266, module_width_bits=32,            # module = 17064
+            module_groups=1, efficiency=0.7,
+        )],
+    )
+    margins = evaluate_margin(predict(topo))
+    assert margins[0].bottleneck == "controller"
+    assert margins[0].effective_peak_mbps == 12800
+
+
+def test_ddr_bottleneck_matched():
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(
+            name="DDR0",
+            controller_mt_s=3200, controller_width_bits=32,
+            module_mt_s=3200, module_width_bits=32,
+            module_groups=1, efficiency=0.7,
+        )],
+    )
+    margins = evaluate_margin(predict(topo))
+    assert margins[0].bottleneck == "matched"
+
+
+def test_ddr_module_groups_multiplies_bandwidth():
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(
+            name="DDR0",
+            controller_mt_s=4266, controller_width_bits=64,   # 34128
+            module_mt_s=4266, module_width_bits=32,            # 17064 per group
+            module_groups=2,                                    # 17064 × 2 = 34128
+            efficiency=0.7,
+        )],
+    )
+    margins = evaluate_margin(predict(topo))
+    assert margins[0].module_peak_mbps == 34128
+    assert margins[0].effective_peak_mbps == 34128  # controller and module both 34128
+    assert margins[0].bottleneck == "matched"
+
+
+def test_ddr_legacy_theoretical_peak_backward_compat():
+    """Legacy: only theoretical_peak_mbps → effective = theoretical, bottleneck = n/a."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=25600, efficiency=0.7)],
+    )
+    margins = evaluate_margin(predict(topo))
+    assert margins[0].effective_peak_mbps == 25600
+    assert margins[0].bottleneck == "n/a"
+    assert margins[0].available_mbps == 17920
+
+
+def test_ddr_physical_params_override_theoretical():
+    """When both physical params and theoretical_peak are present, physical wins."""
+    from buseval.schema import Master, DDRChannel, Topology
+    topo = Topology(
+        masters=[Master(name="X", type="usb", params={"version": "3", "util_pct": 0.1})],
+        ddr_channels=[DDRChannel(
+            name="DDR0",
+            theoretical_peak_mbps=99999,  # should be ignored
+            controller_mt_s=3200, controller_width_bits=32,  # 12800
+            module_mt_s=3200, module_width_bits=32,
+            module_groups=1, efficiency=0.7,
+        )],
+    )
+    margins = evaluate_margin(predict(topo))
+    assert margins[0].effective_peak_mbps == 12800  # from physical, not 99999
+
+
 def test_predict_source_not_found_errors():
     from buseval.schema import Master, DDRChannel, Pipeline, Topology
     topo = Topology(

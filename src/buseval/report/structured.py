@@ -51,7 +51,17 @@ def build_structured(prediction: PredictionResult) -> dict:
 def _margin_to_dict(m) -> dict:
     return {
         "name": m.name,
-        "peak_mbps": m.peak_mbps,
+        "controller_mt_s": m.controller_mt_s,
+        "controller_width_bits": m.controller_width_bits,
+        "controller_type": m.controller_type,
+        "controller_peak_mbps": m.controller_peak_mbps,
+        "module_mt_s": m.module_mt_s,
+        "module_width_bits": m.module_width_bits,
+        "module_groups": m.module_groups,
+        "module_type": m.module_type,
+        "module_peak_mbps": m.module_peak_mbps,
+        "effective_peak_mbps": m.effective_peak_mbps,
+        "bottleneck": m.bottleneck,
         "efficiency": m.efficiency,
         "available_mbps": m.available_mbps,
         "available_read_mbps": m.available_read_mbps,

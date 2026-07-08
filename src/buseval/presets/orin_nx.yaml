@@ -44,5 +44,13 @@ pipelines:
     verify: true
     params: {lanes: 4}
 ddr_channels:
-  - {name: DDR0, theoretical_peak_mbps: 102400, efficiency: 0.7}  # LPDDR5 6400, 128-bit
+  - name: DDR0
+    controller_mt_s: 6400           # Orin NX LPDDR5 controller supports up to 6400 MT/s
+    controller_width_bits: 128      # 128-bit bus
+    controller_type: LPDDR5
+    module_mt_s: 6400               # external LPDDR5-6400 module
+    module_width_bits: 128
+    module_groups: 1
+    module_type: LPDDR5
+    efficiency: 0.7
 alert_thresholds: {yellow: 0.6, red: 0.8}

@@ -117,10 +117,31 @@ pipelines:
     params: {width: 1920, height: 1080, fps: 60, bpp: 32}
 
 ddr_channels:
+  # Two ways to declare DDR bandwidth:
+  #
+  # 1. Physical params (recommended) — the engine computes:
+  #      controller_peak = controller_mt_s × controller_width_bits / 8 × 2  (×2 for DDR double data rate)
+  #      module_peak     = module_mt_s     × module_width_bits     / 8 × 2 × module_groups
+  #      effective_peak  = min(controller_peak, module_peak)   ← bottleneck
+  #      available       = effective_peak × efficiency
+  #    This correctly models the case where the external DRAM module is slower
+  #    (or faster) than the chip's DDR controller — the effective bandwidth is
+  #    limited by the slower of the two.
+  #
+  # 2. Legacy shorthand: theoretical_peak_mbps (assumes controller = module = this value).
+  #    If physical params are present, theoretical_peak_mbps is ignored.
+
   - name: DDR0
-    theoretical_peak_mbps: 25600   # e.g. LPDDR4 4266 × 32-bit / 8
-    efficiency: 0.7                # usable fraction after refresh / row miss / etc.
-    read_write_ratio: null         # null = symmetric (0.5/0.5)
+    # chip DDR controller (from SoC datasheet)
+    controller_mt_s: 4266           # max MT/s the controller supports
+    controller_width_bits: 32       # bus width in bits
+    # external DRAM module (from module datasheet)
+    module_mt_s: 3200               # module rated speed
+    module_width_bits: 32           # module bus width
+    module_groups: 1                # number of groups (ranks / chip selects)
+    # common
+    efficiency: 0.7                 # usable fraction after refresh / row miss / etc.
+    read_write_ratio: null          # null = symmetric (0.5/0.5)
 
 alert_thresholds:
   yellow: 0.6
