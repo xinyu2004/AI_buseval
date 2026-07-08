@@ -15,7 +15,6 @@ spi:
 mipi:
   lane_capacity_gbps: 1.5         # per-lane PHY capacity (CSI-2 D-PHY typical)
   dsi_lane_capacity_gbps: 1.5
-  control_overhead_pct: 0.02      # CSI/DSI controller descriptor/config read overhead (~2%)
 
 # USB
 usb:

@@ -32,20 +32,32 @@
 pip install -e .
 
 # 1. 看样例（零配置）
-buseval predict --soc rk3588
+buseval predict --soc tda4vh
+```
 
+![SoC 带宽报告](result/SOC.png)
+
+```bash
 # 2. CAN-FD 健康报告（2 Mbps）
 buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 # 2b. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
 buseval predict --soc tda4vh \
     --can-dbc CAN0=examples/sample.dbc \
     --can-dbc CAN2=examples/sample_heavy.dbc
+```
 
+![CAN 健康报告](result/CAN.png)
+
+```bash
 # 3. GMSL 链路带宽（独立工具，单路）
 buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
 # 3b. GMSL 多路（YAML）
 buseval predict --GMSL examples/gmsl_links.yaml
+```
 
+![GMSL 链路带宽报告](result/GMSL.png)
+
+```bash
 # 4. 自配 YAML
 cp examples/full_menu.yaml my.yaml
 buseval lint my.yaml

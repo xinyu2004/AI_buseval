@@ -34,13 +34,11 @@ def test_spi_estimator():
     assert abs((r.read_bw_mbps + r.write_bw_mbps) - 6.25) < 1e-6
 
 
-def test_mipi_csi_write_dominant():
+def test_mipi_csi_write_only():
     est = get_estimator("mipi_csi")
     r = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})
-    # CSI: write is the main bandwidth (frames to DDR); read is small (~2% overhead)
-    assert r.write_bw_mbps > r.read_bw_mbps
+    assert r.read_bw_mbps == 0.0
     assert r.write_bw_mbps > 0
-    assert r.read_bw_mbps > 0  # not zero — descriptor/config overhead
     assert "1920x1080" in r.dominant_factor
 
 
@@ -48,9 +46,8 @@ def test_mipi_csi_count_aggregate():
     est = get_estimator("mipi_csi")
     single = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4})
     multi = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})
-    # count=4 → 4x aggregate write bandwidth
     assert abs(multi.write_bw_mbps - single.write_bw_mbps * 4) < 1e-6
-    assert multi.read_bw_mbps > 0  # small overhead
+    assert multi.read_bw_mbps == 0.0
     assert multi.breakdown["per_stream_mbps"] == single.write_bw_mbps
     assert multi.breakdown["count"] == 4
     assert "4x" in multi.dominant_factor
@@ -79,17 +76,15 @@ def test_mipi_dsi_count_read_aggregate():
     r = est.estimate({"width": 1920, "height": 1080, "fps": 60, "bpp": 24, "lanes": 4, "count": 2})
     single = est.estimate({"width": 1920, "height": 1080, "fps": 60, "bpp": 24, "lanes": 4})
     assert abs(r.read_bw_mbps - single.read_bw_mbps * 2) < 1e-6
-    assert r.write_bw_mbps > 0  # small overhead
+    assert r.write_bw_mbps == 0.0
 
 
-def test_mipi_dsi_p2p_source_small_ddr():
-    """DSI with source_input_mbps (p2p from Display): small DDR from descriptor overhead."""
+def test_mipi_dsi_p2p_source_zero_ddr():
+    """DSI with source_input_mbps (p2p from Display): DDR=0, lane check only."""
     est = get_estimator("mipi_dsi")
     r = est.estimate({"source_input_mbps": 165.9, "source": "DISP0", "lanes": 4})
-    # DSI p2p: main data from Display via p2p, but small descriptor read from DDR (~2%)
-    assert r.read_bw_mbps > 0   # small overhead, not zero
-    assert r.read_bw_mbps < 10  # but small (2% of 165.9 ≈ 3.3)
-    assert r.write_bw_mbps == 0.0  # DSI doesn't write to DDR
+    assert r.read_bw_mbps == 0.0
+    assert r.write_bw_mbps == 0.0
     assert r.breakdown["mode"] == "p2p"
     assert r.breakdown["carried_mbps"] == 165.9
     assert r.breakdown["lane_capacity_mbps"] == 750.0
@@ -103,12 +98,11 @@ def test_mipi_dsi_p2p_lane_overflow():
     assert any("exceeds" in a for a in r.assumptions)
 
 
-def test_mipi_dsi_read_dominant():
+def test_mipi_dsi_read_only():
     est = get_estimator("mipi_dsi")
     r = est.estimate({"width": 1920, "height": 1080, "fps": 60, "bpp": 24, "lanes": 4})
-    assert r.read_bw_mbps > r.write_bw_mbps
     assert r.read_bw_mbps > 0
-    assert r.write_bw_mbps > 0  # small overhead
+    assert r.write_bw_mbps == 0.0
 
 
 def test_mipi_lane_overflow_flagged():

@@ -32,20 +32,32 @@ Only the **early prediction** loop is delivered. No collection or comparison yet
 pip install -e .
 
 # 1. Try a sample (zero config)
-buseval predict --soc rk3588
+buseval predict --soc tda4vh
+```
 
+![SoC Bandwidth Report](result/SOC.png)
+
+```bash
 # 2. CAN-FD health report (2 Mbps)
 buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 # 2b. Multi-CAN: route different DBCs to specific CAN controllers
 buseval predict --soc tda4vh \
     --can-dbc CAN0=examples/sample.dbc \
     --can-dbc CAN2=examples/sample_heavy.dbc
+```
 
+![CAN Health Report](result/CAN.png)
+
+```bash
 # 3. GMSL link bandwidth (independent tool, single link)
 buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
 # 3b. GMSL multi-link (YAML)
 buseval predict --GMSL examples/gmsl_links.yaml
+```
 
+![GMSL Link Bandwidth Report](result/GMSL.png)
+
+```bash
 # 4. Configure your own YAML
 cp examples/full_menu.yaml my.yaml
 buseval lint my.yaml
