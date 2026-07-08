@@ -8,19 +8,26 @@ from rich.text import Text
 
 from .calculator import GmslReport, GmslLinkResult
 
+# Color cycle for per-link identification (matches Summary table Link column).
+_LINK_COLORS = ["bold cyan", "bold magenta", "bold yellow", "bold green", "bold blue"]
+# Border styles (without "bold" prefix, for Panel border_style).
+_LINK_BORDER = ["cyan", "magenta", "yellow", "green", "blue"]
+
 
 def render_gmsl_terminal(report: GmslReport, console: Console | None = None, use_color: bool = True) -> None:
     console = console or Console(no_color=not use_color, highlight=False)
 
-    for link in report.links:
-        _render_link(link, console, use_color)
+    for idx, link in enumerate(report.links):
+        _render_link(link, console, use_color, idx)
 
     # summary table
     if len(report.links) > 1:
         _render_summary(report, console, use_color)
 
 
-def _render_link(link: GmslLinkResult, console: Console, use_color: bool) -> None:
+def _render_link(link: GmslLinkResult, console: Console, use_color: bool, idx: int) -> None:
+    color = _LINK_COLORS[idx % len(_LINK_COLORS)]
+    border = _LINK_BORDER[idx % len(_LINK_BORDER)]
     lines = [
         f"  Resolution:  {link.width} × {link.height}",
         f"  FPS:         {link.fps}",
@@ -54,8 +61,8 @@ def _render_link(link: GmslLinkResult, console: Console, use_color: bool) -> Non
     else:
         lines.append(f"    Best fit: NONE (exceeds all tiers)")
 
-    title_style = "bold" if use_color else ""
-    console.print(Panel("\n".join(lines), title=f"GMSL Link: {link.name}", border_style="cyan"))
+    title_text = Text(f"GMSL Link: {link.name}", style=color)
+    console.print(Panel("\n".join(lines), title=title_text, border_style=border))
 
 
 def _render_summary(report: GmslReport, console: Console, use_color: bool) -> None:
@@ -67,14 +74,15 @@ def _render_summary(report: GmslReport, console: Console, use_color: bool) -> No
     t.add_column("Link BW (Gbps)", justify="right")
     t.add_column("Best fit")
 
-    for link in report.links:
+    for idx, link in enumerate(report.links):
+        name_cell = Text(link.name, style=_LINK_COLORS[idx % len(_LINK_COLORS)]) if use_color else link.name
         t.add_row(
-            link.name,
+            name_cell,
             f"{link.width}×{link.height}",
             f"{link.fps}",
             f"{link.link_bw_mbps:,.1f}",
             f"{link.link_bw_mbps/1000:.2f}",
-            link.best_fit.upper() if link.best_fit else "NONE",
+            "",
         )
     t.add_row(
         "TOTAL",
@@ -82,35 +90,39 @@ def _render_summary(report: GmslReport, console: Console, use_color: bool) -> No
         "",
         f"{report.total_link_bw_mbps:,.1f}",
         f"{report.total_link_bw_mbps/1000:.2f}",
-        "",
+        report.to_dict().get("summary", {}).get("aggregate_best_fit", "").upper() or "NONE",
     )
     console.print(t)
 
-    # tier summary
+    # tier summary (aggregate: does the TOTAL fit?)
     coeffs_summary = report.to_dict().get("summary", {})
     tier_sum = coeffs_summary.get("tier_summary", {})
     if tier_sum:
-        tt = Table(title="Tier Summary (per-link, worst case)", show_lines=False)
+        tt = Table(title="Tier Summary (aggregate bandwidth vs tier)", show_lines=False)
         tt.add_column("Tier")
         tt.add_column("Capacity (Gbps)", justify="right")
-        tt.add_column("Worst link util", justify="right")
-        tt.add_column("Fits all?")
+        tt.add_column("Total BW (Mbps)", justify="right")
+        tt.add_column("Aggregate util", justify="right")
+        tt.add_column("Fits aggregate?")
         for name, info in tier_sum.items():
-            fits = info["fits_all"]
+            fits = info["fits_aggregate"]
             mark = "✓" if fits else "✗"
             style = "green" if fits else "red"
+            total_bw = report.total_link_bw_mbps
             if use_color:
                 tt.add_row(
                     name.upper(),
                     f"{info['capacity_mbps']/1000:.1f}",
-                    f"{info['max_link_util']*100:.1f}%",
+                    f"{total_bw:,.1f}",
+                    f"{info['total_util']*100:.1f}%",
                     Text(mark, style=style),
                 )
             else:
                 tt.add_row(
                     name.upper(),
                     f"{info['capacity_mbps']/1000:.1f}",
-                    f"{info['max_link_util']*100:.1f}%",
+                    f"{total_bw:,.1f}",
+                    f"{info['total_util']*100:.1f}%",
                     mark,
                 )
         console.print(tt)

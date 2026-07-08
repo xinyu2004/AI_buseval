@@ -33,9 +33,10 @@ pip install -e .
 
 # 1. 看样例（零配置）
 buseval predict --soc rk3588
-buseval predict --dbc examples/sample.dbc --can-bitrate 2000
 
-# 2. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
+# 2. CAN-FD 健康报告（2 Mbps）
+buseval predict --dbc examples/sample.dbc --can-bitrate 2000
+# 2b. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
 buseval predict --soc tda4vh \
     --can-dbc CAN0=examples/sample.dbc \
     --can-dbc CAN2=examples/sample_heavy.dbc

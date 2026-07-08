@@ -4,7 +4,7 @@
 # encoding_factor: 1.15
 # overhead_factor: 1.067
 links:
-  - {name: CAM_FRONT, width: 1920, height: 1080, fps: 30, bpp: 12}
-  - {name: CAM_REAR,  width: 1920, height: 1080, fps: 30, bpp: 12}
-  - {name: CAM_LEFT,  width: 1280, height: 720,  fps: 60, bpp: 12}
-  - {name: CAM_RIGHT, width: 1280, height: 720,  fps: 60, bpp: 12}
+  - {name: CAM_FRONT, width: 1920, height: 1080, fps: 30, bpp: 8}
+  - {name: CAM_REAR,  width: 1920, height: 1080, fps: 30, bpp: 8}
+  - {name: CAM_LEFT,  width: 1280, height: 720,  fps: 60, bpp: 8}
+  - {name: CAM_RIGHT, width: 1280, height: 720,  fps: 60, bpp: 8}

@@ -75,16 +75,26 @@ def _summary(links: list[GmslLinkResult]) -> dict:
     tiers = coeffs.get("link_tiers", {})
     total = sum(l.link_bw_mbps for l in links)
     max_bw = max(l.link_bw_mbps for l in links)
+    # aggregate best fit: smallest tier that fits the TOTAL (all links share the aggregate)
+    agg_best = ""
+    for tier_name in ("gmsl1", "gmsl2", "gmsl3"):
+        cap = float(tiers.get(tier_name, 0))
+        if total <= cap:
+            agg_best = tier_name
+            break
     return {
         "link_count": len(links),
         "total_link_bw_mbps": round(total, 4),
         "total_link_bw_gbps": round(total / 1000, 4),
         "max_link_bw_mbps": round(max_bw, 4),
+        "aggregate_best_fit": agg_best,
         "tier_summary": {
             name: {
                 "capacity_mbps": cap,
+                "total_util": round(total / cap, 4) if cap else 0,
                 "max_link_util": round(max_bw / cap, 4) if cap else 0,
                 "fits_all": all(l.link_bw_mbps <= cap for l in links),
+                "fits_aggregate": total <= cap,
             }
             for name, cap in tiers.items()
         },
