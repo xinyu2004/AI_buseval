@@ -9,8 +9,9 @@ the input frame read).
 """
 from __future__ import annotations
 
+from ..frame import frame_stream_mbps
 from ..registry import Estimator, register, get_coefficients
-from ...schema import BandwidthEstimate
+from ...schema import BandwidthEstimate, note
 
 
 @register("npu")
@@ -55,7 +56,7 @@ class NpuEstimator(Estimator):
             src_fps = float(s["fps"])
             bpp = float(s.get("bpp", 12))
             count = int(s.get("count", 1))
-            mbps = w * h * src_fps * bpp * count / 8.0 / 1e6
+            mbps = frame_stream_mbps(w, h, src_fps, bpp, count)
             input_frame_mbps += mbps
             per_source.append({
                 "name": s.get("name"),
@@ -66,8 +67,11 @@ class NpuEstimator(Estimator):
             })
             if fps < src_fps:
                 assumptions.append(
-                    f"inference_fps {fps} < source '{s.get('name','?')}' fps {src_fps} "
-                    f"(async; not capped)"
+                    note(
+                        f"inference_fps {fps} < source '{s.get('name','?')}' fps {src_fps} "
+                        f"(async; not capped)",
+                        "yellow",
+                    )
                 )
 
         read = weight_bw + act_bw * 0.5 + input_frame_mbps
@@ -77,10 +81,10 @@ class NpuEstimator(Estimator):
             ratio = tops_used / tops_peak
             if ratio > coeffs["tops_safety_limit_pct"]:
                 assumptions.append(
-                    f"tops_used {tops_used} > {ratio:.0%} of peak {tops_peak}"
+                    note(f"tops_used {tops_used} > {ratio:.0%} of peak {tops_peak}", "red")
                 )
         if tops_peak > 0 and not tops_used:
-            assumptions.append("tops_peak set but tops_used not provided for sanity check")
+            assumptions.append(note("tops_peak set but tops_used not provided for sanity check", "yellow"))
 
         source_names = [s.get("name") for s in sources_spec if s.get("name")]
         src_join = "+".join(source_names)

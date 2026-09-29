@@ -10,6 +10,20 @@ from buseval.schema import BandwidthEstimate
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
+def _ddr(peak, efficiency=0.7):
+    """Both sides at `peak` MB/s: 32-bit, one group, so MT/s = peak / 4."""
+    from buseval.schema import DDRChannel
+    mt = peak / 4.0
+    return DDRChannel(
+        name="DDR0",
+        controller_mt_s=mt,
+        module_mt_s=mt,
+        controller_width_bits=32,
+        module_width_bits=32,
+        efficiency=efficiency,
+    )
+
+
 def test_all_estimators_registered():
     expected = {
         "can", "can_dbc", "spi", "mipi_csi", "mipi_dsi",
@@ -57,10 +71,10 @@ def test_mipi_csi_count_lane_check_uses_aggregate():
     est = get_estimator("mipi_csi")
     # 9 streams of 1080p@30 12bpp on 4-lane: 839 MB/s > 750 MB/s lane cap
     r = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 9})
-    assert any("exceeds" in a for a in r.assumptions)
+    assert any("exceeds" in a["message"] for a in r.assumptions)
     # 4 streams: 373 MB/s < 750 MB/s, no overflow
     r4 = est.estimate({"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})
-    assert not any("exceeds" in a for a in r4.assumptions)
+    assert not any("exceeds" in a["message"] for a in r4.assumptions)
 
 
 def test_mipi_csi_count_default_backward_compat():
@@ -95,7 +109,7 @@ def test_mipi_dsi_p2p_lane_overflow():
     """DSI p2p: carried bandwidth exceeds lane capacity → RED assumption."""
     est = get_estimator("mipi_dsi")
     r = est.estimate({"source_input_mbps": 800.0, "source": "DISP0", "lanes": 4})
-    assert any("exceeds" in a for a in r.assumptions)
+    assert any("exceeds" in a["message"] for a in r.assumptions)
 
 
 def test_mipi_dsi_read_only():
@@ -108,7 +122,7 @@ def test_mipi_dsi_read_only():
 def test_mipi_lane_overflow_flagged():
     est = get_estimator("mipi_csi")
     r = est.estimate({"width": 4096, "height": 3072, "fps": 60, "bpp": 16, "lanes": 1})
-    assert any("exceeds" in a for a in r.assumptions)
+    assert any("exceeds" in a["message"] for a in r.assumptions)
 
 
 def test_usb_estimator():
@@ -126,11 +140,53 @@ def test_eth_estimator_frame_overhead():
     assert r.write_bw_mbps > 0
 
 
+def test_eth_sourced_from_a_stream_does_not_add_utilization():
+    est = get_estimator("eth")
+    r = est.estimate({
+        "link_gbps": 1, "util_pct": 0.9, "mtu": 1500, "source_input_mbps": 2.2,
+    })
+    assert r.read_bw_mbps == pytest.approx(2.2)
+    assert r.write_bw_mbps == 0
+    assert r.assumptions == []
+    overflow = est.estimate({
+        "link_gbps": 1, "util_pct": 0.1, "mtu": 1500, "source_input_mbps": 500,
+    })
+    assert overflow.read_bw_mbps == pytest.approx(500)
+    assert any("exceeds" in a["message"] for a in overflow.assumptions)
+
+
 def test_flash_random_penalty():
     est = get_estimator("flash")
     r_seq = est.estimate({"seq_read_mbps": 1000, "seq_write_mbps": 0, "util_pct": 1.0, "random_ratio": 0.0})
     r_rand = est.estimate({"seq_read_mbps": 1000, "seq_write_mbps": 0, "util_pct": 1.0, "random_ratio": 1.0})
     assert r_seq.read_bw_mbps > r_rand.read_bw_mbps
+
+
+def test_shared_format_table_and_custom_bpp():
+    from buseval.estimators.formats import bpp_for_format, resolve_bpp
+    assert bpp_for_format("nv12") == 12
+    assert bpp_for_format("yuyv") == 16
+    assert bpp_for_format("p010") == 24
+    assert bpp_for_format("custom") is None
+    assert resolve_bpp({"format": "nv12", "bpp": 8}) == 12
+    assert resolve_bpp({"format": "custom", "bpp": 20}) == 20
+
+
+def test_isp_stage_format_is_the_picture_handed_on():
+    est = get_estimator("isp")
+    r = est.estimate({
+        "width": 1280, "height": 720, "fps": 60, "format": "raw12",
+        "mode": "serial",
+        "stages": [
+            {"name": "bayer", "format": "raw12", "read_factor": 1.0, "write_factor": 1.0},
+            {"name": "demosaic", "format": "rgb888", "read_factor": 1.5, "write_factor": 1.0},
+            {"name": "yuv_scale", "format": "yuv420", "read_factor": 1.0, "write_factor": 1.0},
+        ],
+    })
+    raw = 1280 * 720 * 60 * 12 / 8 / 1e6
+    assert abs(r.breakdown["output_mbps"] - raw) < 1e-3
+    assert r.breakdown["output_format"] == "yuv420"
+    assert abs(r.read_bw_mbps - raw * 2) < 1e-3
 
 
 def test_isp_serial_vs_parallel():
@@ -170,6 +226,18 @@ def test_display_read_only():
     assert r.write_bw_mbps == 0.0
 
 
+def test_can_uses_dbc_when_a_file_is_set():
+    dbc = EXAMPLES / "sample.dbc"
+    if not dbc.exists():
+        pytest.skip("sample.dbc not found")
+    load = get_estimator("can")
+    dbc_est = get_estimator("can_dbc")
+    params = {"dbc_path": str(dbc), "bitrate_mbps": 0.5, "load_pct": 0.3}
+    assert load.estimate(params).read_bw_mbps == dbc_est.estimate(params).read_bw_mbps
+    plain = load.estimate({"bitrate_mbps": 0.5, "load_pct": 0.3})
+    assert plain.breakdown["bitrate_mbps"] == 0.5
+
+
 def test_can_dbc_estimator_with_sample():
     dbc = EXAMPLES / "sample.dbc"
     if not dbc.exists():
@@ -197,7 +265,7 @@ def test_isp_with_inherited_dimensions():
     assert "from CSI1" in r.dominant_factor
 
 
-def test_isp_count_multiplies_frame_stream():
+def test_isp_count_does_not_multiply():
     est = get_estimator("isp")
     single = est.estimate({
         "width": 1920, "height": 1080, "fps": 30, "bpp": 12,
@@ -209,7 +277,20 @@ def test_isp_count_multiplies_frame_stream():
         "mode": "serial",
         "stages": [{"name": "x", "read_factor": 1.0, "write_factor": 1.0}],
     })
-    assert abs(multi.read_bw_mbps - single.read_bw_mbps * 4) < 1e-6
+    assert abs(multi.read_bw_mbps - single.read_bw_mbps) < 1e-6
+
+
+def test_isp_stage_size_beats_a_later_camera_size():
+    est = get_estimator("isp")
+    r = est.estimate({
+        "width": 1920, "height": 1080, "fps": 60, "bpp": 12,
+        "mode": "serial",
+        "stages": [{"name": "bayer", "format": "raw12", "width": 1280, "height": 720,
+                    "read_factor": 1.0, "write_factor": 1.0}],
+    })
+    picture = 1280 * 720 * 60 * 12 / 8 / 1e6
+    assert abs(r.read_bw_mbps - picture) < 1e-3
+    assert r.breakdown["output_width"] == 1280
 
 
 def test_npu_inherits_input_frame_dimensions():
@@ -274,7 +355,7 @@ def test_npu_no_cap_uses_native_fps():
     # input uses native 30 (not capped to 20) = 373.248
     assert abs(r.breakdown["input_frame_mbps"] - 373.248) < 1e-3
     # soft warning: inference_fps < source fps
-    assert any("async" in a for a in r.assumptions)
+    assert any("async" in a["message"] for a in r.assumptions)
 
 
 def test_npu_single_source_str_backward_compat():
@@ -286,14 +367,14 @@ def test_npu_single_source_str_backward_compat():
                         params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
         pipelines=[Pipeline(name="NPU0", type="npu", source="CSI0",
                             params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0})],
-        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+        ddr_channels=[_ddr(100000)],
     )
     topo_list = Topology(
         masters=[Master(name="CSI0", type="mipi_csi",
                         params={"width": 1920, "height": 1080, "fps": 30, "bpp": 12, "lanes": 4, "count": 4})],
         pipelines=[Pipeline(name="NPU0", type="npu", source=["CSI0"],
                             params={"params_mbytes": 10, "activation_mbytes": 5, "inference_fps": 30, "tops_peak": 0})],
-        ddr_channels=[DDRChannel(name="DDR0", theoretical_peak_mbps=100000, efficiency=0.7)],
+        ddr_channels=[_ddr(100000)],
     )
     r_str = predict(topo_str)
     r_list = predict(topo_list)

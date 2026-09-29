@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+gui = ["PySide6>=6.5"]
 
 [project.scripts]
 buseval = "buseval.cli:main"
@@ -27,4 +28,9 @@ buseval = "buseval.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-buseval = ["estimators/_coefficients.yaml", "presets/*.yaml"]
+buseval = [
+    "estimators/_coefficients.yaml",
+    "presets/*.yaml",
+    "gui/param_schema.yaml",
+    "collectors/*",
+]

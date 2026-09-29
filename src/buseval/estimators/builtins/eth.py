@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..registry import Estimator, register, get_coefficients
-from ...schema import BandwidthEstimate
+from ...schema import BandwidthEstimate, note
 
 
 @register("eth")
@@ -16,12 +16,39 @@ class EthEstimator(Estimator):
 
         overhead = coeffs["frame_overhead_bytes"]
         eff = mtu / (mtu + overhead)
-        bw = link_gbps * 1000 * util_pct * eff / 8.0  # MB/s
+        capacity = link_gbps * 1000 * eff / 8.0  # MB/s the link can carry
+
+        # A connected upstream (VENC bitstream, or another picture) is the DDR
+        # read. Do not add link × util on top of that stream.
+        if "source_input_mbps" in params:
+            bw = float(params["source_input_mbps"])
+            assumptions = []
+            if bw > capacity:
+                assumptions.append(note(
+                    f"stream {bw:.1f} MB/s exceeds {link_gbps:g}G link {capacity:.1f} MB/s",
+                    "red",
+                ))
+            return BandwidthEstimate(
+                read_bw_mbps=round(bw, 4),
+                write_bw_mbps=0.0,
+                breakdown={
+                    "link_gbps": link_gbps,
+                    "mtu": mtu,
+                    "frame_efficiency": round(eff, 4),
+                    "link_capacity_mbps": round(capacity, 4),
+                    "source_input_mbps": round(bw, 4),
+                    "source": params.get("source"),
+                },
+                dominant_factor=f"bitstream {bw:.1f} MB/s",
+                assumptions=assumptions,
+            )
+
+        bw = capacity * util_pct
         r, w = _split(bw, direction)
 
         assumptions = []
         if util_pct > get_coefficients()["alerts"]["aggressive_util_pct"]:
-            assumptions.append(f"aggressive ETH util_pct={util_pct}")
+            assumptions.append(note(f"aggressive ETH util_pct={util_pct}", "red"))
 
         return BandwidthEstimate(
             read_bw_mbps=round(r, 4),

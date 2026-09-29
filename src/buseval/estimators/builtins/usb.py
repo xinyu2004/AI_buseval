@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..registry import Estimator, register, get_coefficients
-from ...schema import BandwidthEstimate
+from ...schema import BandwidthEstimate, note
 
 
 @register("usb")
@@ -25,7 +25,7 @@ class UsbEstimator(Estimator):
 
         assumptions = []
         if util_pct > get_coefficients()["alerts"]["aggressive_util_pct"]:
-            assumptions.append(f"aggressive USB util_pct={util_pct}")
+            assumptions.append(note(f"aggressive USB util_pct={util_pct}", "red"))
 
         return BandwidthEstimate(
             read_bw_mbps=round(r, 4),

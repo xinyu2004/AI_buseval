@@ -2,29 +2,28 @@
 
 # buseval — SoC Bandwidth Evaluation Tool
 
-Predict and measure whether DDR bandwidth is sufficient on multi-core heterogeneous SoCs, covering peripherals (CAN / SPI / MIPI / USB / ETH / FLASH) and internal pipelines (ISP / NPU / GPU / Display), and compare predicted vs. measured values.
+Settle the DDR choice while the board can still change. When silicon measurements come back, check the estimate against them.
 
 ## Why
 
-Modern SoCs are multi-core heterogeneous systems with many peripherals and accelerators. Bandwidth is often estimated by gut feel in early project stages, and DDR insufficiency is only discovered during measurement — when rework is expensive. buseval turns "early prediction" and "measurement comparison" into a repeatable, auditable engineering workflow.
+Bus width, DRAM speed, and how many devices sit on the board are locked in at layout. Too little bandwidth shows up as dropped frames and another spin of the board. Too much is paid for on every unit that ships. buseval is where that choice is made while the design is still open, and where it is checked again once the chip can be measured.
 
 ## Overall Goal
 
-1. **Early prediction** — Input usage-scenario parameters (DBC, resolution/fps, bitrate/load, TOPS, …). The engine estimates per-master / per-pipeline read & write bandwidth, aggregates them, compares against available DDR bandwidth, and reports headroom and alerts.
-2. **Measurement collection** — Read real bandwidth from the chip via `perf` / `ddr-perf`.
-3. **Prediction vs. measurement** — Quantify deviation, attribute it to parameters or formulas, and iterate to calibrate.
+1. **Before layout** — Describe the scene: cameras, DBC, bitrates, TOPS. The engine adds up read and write demand, sets it against the DDR this board can deliver, and shows which blocks consume it.
+2. **On the bench** — Read the same bandwidth back from the chip.
+3. **After measurement** — Put the two figures side by side, see where the model drifted, and keep the memory parts on the configuration that is actually enough.
 
-## Current Target (Phase 1)
+## Phase 1 (frozen)
 
-Only the **early prediction** loop is delivered. No collection or comparison yet. Specifically:
+Early prediction, from the command line and the canvas. Collection and comparison stay on the roadmap.
 
-- Pluggable estimator engine with 11 built-in peripheral / pipeline estimators
-- Three entry points: direct DBC read (CAN health report), SoC preset, YAML menu
-- 7 mainstream SoC presets
-- A fake sample DBC + a full-menu YAML template
-- Reports: Top-N contributors, read/write separation, assumptions audit, one-line breakdown annotation
-- CAN health report (load ratio / Top messages / worst-case frame latency / overload suggestions)
-- `lint` for missing-item / contradiction checks
+- 14 built-in estimators
+- Entries: SoC DDR topology (empty canvas, a common SoC, or a private SoC), CAN health, GMSL link
+- 7 common SoCs, a sample DBC, and a full-menu YAML template
+- Report: top contributors, read and write demand, R-util / W-util / occupancy on one green-yellow-red scale. The verdict follows occupancy. Assumptions appear only when something is flagged
+- Canvas: drag modules, connect `source`, evaluate in-process. The DDR card shows the occupancy percent in green, yellow, or red
+- `lint` for missing items and contradictions
 
 ## Quick Start
 
@@ -35,7 +34,7 @@ pip install -e .
 buseval predict --soc tda4vh
 ```
 
-![SoC Bandwidth Report](result/SOC.png)
+![SoC Bandwidth Report](./gallery/SOC.png)
 
 ```bash
 # 2. CAN-FD health report (2 Mbps)
@@ -46,7 +45,7 @@ buseval predict --soc tda4vh \
     --can-dbc CAN2=examples/sample_heavy.dbc
 ```
 
-![CAN Health Report](result/CAN.png)
+![CAN Health Report](./gallery/CAN.png)
 
 ```bash
 # 3. GMSL link bandwidth (independent tool, single link)
@@ -55,7 +54,7 @@ buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
 buseval predict --GMSL examples/gmsl_links.yaml
 ```
 
-![GMSL Link Bandwidth Report](result/GMSL.png)
+![GMSL Link Bandwidth Report](./gallery/GMSL.png)
 
 ```bash
 # 4. Configure your own YAML
@@ -64,12 +63,42 @@ buseval lint my.yaml
 buseval predict -t my.yaml
 ```
 
+## GUI
+
+The CLI and the GUI do not call each other. They share topology YAML. `buseval predict -t` is the Phase 1 command.
+
+```bash
+pip install -e '.[gui]'
+buseval gui
+```
+
+Startup asks what to evaluate.
+
+- **SoC DDR topology** — an empty canvas, a common SoC, or a private SoC file. The canvas has a module palette. Drag modules, draw `source` edges, double-click a node to edit parameters, double-click the DDR card to edit the channel. The DDR strip only shows status. Evaluate runs in the GUI process. A module's color deepens with its share of read+write bandwidth, and the DDR card shows occupancy in green, yellow, or red. The saved YAML still works with `buseval predict -t`.
+- **CAN health** and **GMSL link** open their own pages from that dialog and from the File menu. They are not nodes on the topology canvas.
+
+GMSL is one page: up to four cameras on one coax, the link formula, and a tier. The CLI panel above is the same calculation.
+
+![GMSL link dialog](./gallery/gmsl-gui.png)
+
+## Measurement
+
+Every platform adapter writes the same `meas.json`. On a basic ARM PC, `src/buseval/collectors/arm_pmu.sh` runs `perf`. A board uses a shell script when the counters are already a command or sysfs file. C is only for counters a shell cannot read.
+
+```bash
+buseval collect --platform arm_pc -o meas.json
+buseval compare -t my.yaml -m meas.json
+```
+
+The GUI imports that same file from Measure → Import. Each front end compares on its own.
+
 ## Roadmap
 
-- **Phase 1** — Early prediction loop (current)
-- **Phase 2** — Measurement collection (`perf` / `ddr-perf`)
-- **Phase 3** — Prediction vs. measurement comparison + attribution chain + `scenario diff`
-- **Phase 4** — Coefficient self-calibration + Web UI
+- **Phase 1, frozen** — CLI and GUI for SoC DDR, CAN health, and GMSL. DDR occupancy is green, yellow, or red
+- **Stage A** — ARM PC `perf` collection of CPU memory bandwidth, compared with the prediction
+- **Stage B** — SoC DDR counters (TDA4VH first), shell when the platform already exposes them
+- **Stage C** — On-board CAN / GMSL, still `meas.json`
+- Coefficient self-calibration stays later
 
 ## Supported Estimators
 
@@ -138,7 +167,7 @@ also sources CSI0) as a starting point; edit the YAML to match your board.
 `_coefficients.yaml`): h264=30, h265=50, av1=70. Override per instance with
 `params.compression_ratio: 40`.
 
-## Supported SoC Presets
+## Common SoCs
 
 TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Allwinner T527 / NXP S32G
 

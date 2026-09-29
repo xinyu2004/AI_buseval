@@ -1,17 +1,27 @@
 """Terminal report using rich tables."""
 from __future__ import annotations
 
-from rich.console import Console
+import os
+
+from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
 from ..engine.predictor import PredictionResult
-from ..engine.margin import ChannelMargin, evaluate_margin
 from ..dbc.health_report import HealthReport
 
 
 _VERDICT_COLOR = {"OK": "green", "WARN": "yellow", "CRITICAL": "red"}
+
+
+def _share_style(ratio: float, yellow: float, red: float) -> str:
+    """Same lines as the DDR card: under yellow is green, then yellow, then red."""
+    if ratio >= red:
+        return "red"
+    if ratio >= yellow:
+        return "yellow"
+    return "green"
 
 # Assumption level → (tag, color) for the Lv column.
 _LEVEL_TAG = {
@@ -89,7 +99,7 @@ def _name_cell(name: str, use_color: bool, color_map: dict):
 
 def render_terminal(prediction: PredictionResult, console: Console | None = None, use_color: bool = True) -> str:
     console = console or Console(no_color=not use_color, highlight=False)
-    margins = evaluate_margin(prediction)
+    margins = prediction.margins
 
     # DDR detail panel (controller vs module vs effective)
     for m in margins:
@@ -135,8 +145,18 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
     t.add_column("R-util", justify="right")
     t.add_column("W-demand", justify="right")
     t.add_column("W-util", justify="right")
-    t.add_column("R/W")
+    t.add_column("Occupancy", justify="right")
     t.add_column("Verdict")
+
+    thresholds = prediction.topology.alert_thresholds
+    yellow = float(thresholds.get("yellow", 0.6))
+    red = float(thresholds.get("red", 0.8))
+
+    def _pct(ratio: float):
+        text = f"{ratio * 100:.1f}%"
+        if not use_color:
+            return text
+        return Text(text, style=_share_style(ratio, yellow, red))
 
     for m in margins:
         color = _VERDICT_COLOR.get(m.verdict, "white")
@@ -145,10 +165,10 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
             f"{m.effective_peak_mbps:,.0f}",
             f"{m.available_mbps:,.0f}",
             f"{m.read_demand_mbps:,.0f}",
-            f"{m.read_util*100:.1f}%",
+            _pct(m.read_util),
             f"{m.write_demand_mbps:,.0f}",
-            f"{m.write_util*100:.1f}%",
-            f"{m.rw_imbalance*100:.0f}{'*' if m.rw_imbalance_flag else ''}",
+            _pct(m.write_util),
+            _pct(m.occupancy),
             Text(m.verdict, style=color),
         )
     console.print(t)
@@ -201,30 +221,73 @@ def render_terminal(prediction: PredictionResult, console: Console | None = None
             else:
                 ta.add_row(tag, a["item"], a["message"])
         console.print(ta)
-    else:
-        console.print("[green]No flagged assumptions.[/green]")
 
     return ""
 
 
+def _use_ui_language() -> None:
+    from PySide6.QtCore import QSettings
+
+    from ..gui.i18n import set_lang
+
+    override = os.environ.get("BUSEVAL_UI_SETTINGS")
+    if override:
+        settings = QSettings(override, QSettings.Format.IniFormat)
+    else:
+        settings = QSettings("buseval", "buseval")
+    value = str(settings.value("language", "zh") or "zh")
+    set_lang(value if value in ("zh", "en") else "zh")
+
+
+def _colored_ends(line: str, style: str) -> Text:
+    left, rest = line.split(" = ", 1)
+    middle, right = rest.rsplit(" = ", 1)
+    text = Text()
+    text.append(f"{left} =", style=style)
+    text.append(f" {middle} ")
+    text.append(f"= {right}", style=style)
+    return text
+
+
+def _health_lines(bus, color: str, use_color: bool) -> list:
+    from ..dbc.health_report import latency_text
+    from ..gui.i18n import t
+
+    if bus.illegal_count:
+        key = "can_fit_can" if bus.standard == "can" else "can_fit_fd"
+        sentence = t(key).format(n=bus.illegal_count)
+        return [Text(sentence, style=color if use_color else "")]
+    headline = t("can_result").format(
+        load=f"{bus.load_pct * 100:.3f}",
+        latency=f"{bus.worst_case_latency_ms:.2f}",
+    )
+    longest = max((int(msg["dlc"]) for msg in bus.top_messages), default=0)
+    steps = latency_text(longest, bus.data_kbps, bus.load_pct, bus.total_kbps, standard=bus.standard)
+    chunks = [Text(headline, style=color if use_color else ""), Text("")]
+    for index, line in enumerate(steps):
+        if use_color and index in (2, 4):
+            chunks.append(_colored_ends(line, color))
+        else:
+            chunks.append(Text(line))
+    return chunks
+
+
 def render_health_terminal(report: HealthReport, console: Console | None = None, use_color: bool = True) -> str:
     console = console or Console(no_color=not use_color, highlight=False)
-    for b in report.buses:
-        color = _VERDICT_COLOR.get(b.verdict, "white")
-        title = Text(f"{b.name}  bitrate {b.bitrate_kbps:.0f}kbps  load {b.load_pct*100:.1f}%  {b.verdict}", style=color)
-        lines = [
-            f"Total load: {b.total_kbps:.2f} kbps ({b.load_pct*100:.1f}%)",
-            f"Worst-case latency: {b.worst_case_latency_ms:.2f} ms",
-        ]
-        if b.suggestions:
-            lines.append("Suggestions:")
-            for s in b.suggestions:
-                lines.append(f"  - {s}")
-        lines.append("Top messages:")
-        for m in b.top_messages:
-            lines.append(
-                f"  {m['name']:<28} {m['id']:<8} DLC={m['dlc']:<3} "
-                f"{m['cycle_ms']:.0f}ms  {m['bps']:.0f}bps  {m['share_pct']:.1f}%"
-            )
-        console.print(Panel("\n".join(lines), title=title, border_style=color))
+    _use_ui_language()
+    for bus in report.buses:
+        color = _VERDICT_COLOR.get(bus.verdict, "white")
+        title = Text(
+            f"{bus.name}  bitrate {bus.bitrate_kbps:.0f}kbps  load {bus.load_pct*100:.1f}%  {bus.verdict}",
+            style=color if use_color else "",
+        )
+        chunks = _health_lines(bus, color, use_color)
+        chunks.append(Text(""))
+        chunks.append(Text("Top messages:"))
+        for msg in bus.top_messages:
+            chunks.append(Text(
+                f"  {msg['name']:<28} {msg['id']:<8} DLC={msg['dlc']:<3} "
+                f"{msg['cycle_ms']:.0f}ms  {msg['bps']:.0f}bps  {msg['share_pct']:.1f}%"
+            ))
+        console.print(Panel(Group(*chunks), title=title, border_style=color))
     return ""

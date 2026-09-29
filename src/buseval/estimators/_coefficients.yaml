@@ -79,15 +79,23 @@ ddr:
   default_efficiency: 0.7
 
 # GMSL link bandwidth (independent tool, not part of topology)
-# link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
+# coax = PCLK × (max(bpp, 9) + crc) × encoding × (2048/2047) × fec
 gmsl:
-  default_blanking: 1.2         # 20% blanking (multiplier form, matches formula)
-  encoding_factor: 1.15         # 8b/10b + compression effective rate
-  overhead_factor: 1.067        # FEC + header + checksum
-  link_tiers:                   # for recommendation table (Mbps)
-    gmsl1: 1500
-    gmsl2: 3000
-    gmsl3: 6000
+  default_blanking: 1.2         # CSI always; coax only when heartbeat is on
+  link_tiers:                   # line rate, Mbps. Occupancy uses this, not a derated payload.
+    gmsl1: 3120                 # GMSL1 forward
+    gmsl2_3g: 3000              # GMSL2 3 Gbps mode
+    gmsl2_6g: 6000              # GMSL2 6 Gbps mode
+    gmsl3: 12000                # GMSL3 PAM4, FEC is applied in the calculator
+
+# Cache line for the arm_pc perf parser. There is no CPU canvas module.
+cpu:
+  cache_line_bytes: 64
+
+# Prediction vs measurement. Error is |measured-predicted| / |predicted|.
+compare:
+  ok_error_pct: 0.15
+  warn_error_pct: 0.30
 
 # Alerts
 alerts:

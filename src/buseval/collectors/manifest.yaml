@@ -1,0 +1,9 @@
+# Which program produces meas.json on each platform.
+# run is a path relative to this directory. sh is the default on a board.
+# Use Python when the host must parse perf text. Use C only when the
+# counter is not readable from a shell.
+platforms:
+  arm_pc:
+    run: arm_pmu.sh
+    kind: cpu_bw
+    source: arm_pmu

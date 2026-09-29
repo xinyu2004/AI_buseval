@@ -1,6 +1,8 @@
 """GPU and Display estimators."""
 from __future__ import annotations
 
+from ..formats import resolve_bpp
+from ..frame import frame_stream_mbps
 from ..registry import Estimator, register, get_coefficients
 from ...schema import BandwidthEstimate
 
@@ -12,10 +14,10 @@ class GpuEstimator(Estimator):
         w = int(params["width"])
         h = int(params["height"])
         fps = float(params["fps"])
-        bpp = float(params.get("bpp", 32))
+        bpp = resolve_bpp(params, 32)
         overdraw = float(params.get("overdraw", coeffs["default_overdraw"]))
 
-        bw = w * h * fps * bpp * overdraw / 8.0 / 1e6  # MB/s
+        bw = frame_stream_mbps(w, h, fps, bpp, 1) * overdraw
         return BandwidthEstimate(
             read_bw_mbps=round(bw, 4),
             write_bw_mbps=round(bw, 4),
@@ -51,9 +53,9 @@ class DisplayEstimator(Estimator):
         w = int(params["width"])
         h = int(params["height"])
         fps = float(params["fps"])
-        bpp = float(params.get("bpp", coeffs["default_bpp"]))
+        bpp = resolve_bpp(params, float(coeffs["default_bpp"]))
 
-        bw = w * h * fps * bpp / 8.0 / 1e6  # MB/s
+        bw = frame_stream_mbps(w, h, fps, bpp, 1)
         return BandwidthEstimate(
             read_bw_mbps=round(bw, 4),
             write_bw_mbps=0.0,

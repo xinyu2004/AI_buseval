@@ -8,7 +8,11 @@ import time
 import yaml
 
 from ..engine.predictor import PredictionResult
-from ..engine.margin import evaluate_margin
+from ..schema import note_message
+
+
+def _strip_ui(row: dict) -> dict:
+    return {k: v for k, v in row.items() if not str(k).startswith("ui_")}
 
 
 def _topology_hash(prediction: PredictionResult) -> str:
@@ -19,14 +23,15 @@ def _topology_hash(prediction: PredictionResult) -> str:
         return ""
     payload = {
         "masters": sorted(
-            [m.model_dump(exclude_none=True) for m in topo.masters],
+            [_strip_ui(m.model_dump(exclude_none=True)) for m in topo.masters],
             key=lambda d: d.get("name", ""),
         ),
         "pipelines": sorted(
-            [p.model_dump(exclude_none=True) for p in topo.pipelines],
+            [_strip_ui(p.model_dump(exclude_none=True)) for p in topo.pipelines],
             key=lambda d: d.get("name", ""),
         ),
-        "ddr_channels": [c.model_dump(exclude_none=True) for c in topo.ddr_channels],
+        "ddr_channels": [_strip_ui(c.model_dump(exclude_none=True)) for c in topo.ddr_channels],
+        "isp_vpacs": [slot.model_dump() for slot in topo.isp_vpacs],
         "alert_thresholds": topo.alert_thresholds,
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -34,7 +39,7 @@ def _topology_hash(prediction: PredictionResult) -> str:
 
 
 def build_structured(prediction: PredictionResult) -> dict:
-    margins = evaluate_margin(prediction)
+    margins = prediction.margins
     return {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "topology_hash": _topology_hash(prediction),
@@ -65,14 +70,11 @@ def _margin_to_dict(m) -> dict:
         "bottleneck": m.bottleneck,
         "efficiency": m.efficiency,
         "available_mbps": m.available_mbps,
-        "available_read_mbps": m.available_read_mbps,
-        "available_write_mbps": m.available_write_mbps,
         "read_demand_mbps": m.read_demand_mbps,
         "write_demand_mbps": m.write_demand_mbps,
         "read_util": m.read_util,
         "write_util": m.write_util,
-        "rw_imbalance": m.rw_imbalance,
-        "rw_imbalance_flag": m.rw_imbalance_flag,
+        "occupancy": m.occupancy,
         "verdict": m.verdict,
     }
 
@@ -85,8 +87,7 @@ def _item_to_dict(it) -> dict:
         "read_bw_mbps": it.read_bw_mbps,
         "write_bw_mbps": it.write_bw_mbps,
         "dominant_factor": it.dominant_factor,
-        "assumptions": it.assumptions,
-        "verify": it.verify,
+        "assumptions": [note_message(a) for a in it.assumptions],
         "breakdown": it.breakdown,
     }
 

@@ -10,7 +10,6 @@ class CANDbcEstimator(Estimator):
     def estimate(self, params: dict) -> BandwidthEstimate:
         coeffs = get_coefficients()["can"]
         dbc_path = params["dbc_path"]
-        target_bus = params.get("bus_id")
         direction = params.get("direction", "both")  # rx|tx|both
 
         import cantools
@@ -19,10 +18,6 @@ class CANDbcEstimator(Estimator):
         total_bits_per_sec = 0.0
         per_msg = []
         for msg in db.messages:
-            # bus match (cantools may expose msg.bus as str or None)
-            msg_bus = getattr(msg, "bus", None)
-            if target_bus is not None and msg_bus not in (None, str(target_bus)):
-                continue
             cycle = msg.cycle_time
             if not cycle or cycle <= 0:
                 continue
@@ -44,7 +39,6 @@ class CANDbcEstimator(Estimator):
             write_bw_mbps=round(w, 4),
             breakdown={
                 "dbc_path": dbc_path,
-                "bus_id": target_bus,
                 "messages": per_msg[:10],
                 "message_count": len(per_msg),
                 "raw_bits_per_sec": round(total_bits_per_sec, 1),

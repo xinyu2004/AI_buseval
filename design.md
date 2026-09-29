@@ -8,16 +8,16 @@
 - **采集**：从芯片实测计数器读取真实带宽。
 - **对比**：量化预测与实测偏差，归因到参数/公式，迭代校准。
 
-### 1.2 现有目标（Phase 1）
-仅实现"前期预测"闭环。不涉及采集与对比。
+### 1.2 Phase 1（已冻结）
+前期预测，含命令行和画布。采集与对比不在这次冻结里。
 
 ## 2. 核心设计原则
 
 1. **填参数不填答案**：YAML 填使用场景（DBC、分辨率/fps），引擎算带宽。
 2. **可插拔 estimator**：每类外设一个估算器，registry 注册，用户可扩展。
 3. **分层入口**：DBC 直读（零门槛）→ SoC 预设（一条命令）→ YAML 菜单（满血可配）。
-4. **可审计**：所有默认值/激进假设进 assumptions 段分级标色（RED/YEL/INFO），预测结果带 breakdown + dominant_factor。
-5. **峰值汇总 + 读写分离**：master 峰值带宽加总对比 DDR；读写分别评估。
+4. **可审计**：激进假设进 assumptions，带 RED/YEL/INFO。没有记录时终端不打印这一段。每项带 breakdown 和 dominant_factor。
+5. **占用率裁决**：读写需求分别列出。占用率是两者之和除以可用带宽，绿黄红和裁决都看这个数。
 6. **参数与代码分离**：估算系数集中在 `_coefficients.yaml`，可校准不动代码。
 7. **数据流显式连线**：pipeline 通过 `source` 字段声明输入来源（master 或 pipeline），支持 p2p 链式 + 多源。
 
@@ -38,7 +38,7 @@
 ├──────────────────────────────────────────────────┤
 │  核心引擎                                         │
 │  ┌─────────────────────────────────────────────┐ │
-│  │ estimator registry (13 builtins)            │ │
+│  │ estimator registry (14 builtins)            │ │
 │  │  CAN/SPI/MIPI/USB/ETH/FLASH/ISP/NPU/GPU     │ │
 │  │  /Display/VENC/VDEC                         │ │
 │  └─────────────────────────────────────────────┘ │
@@ -60,6 +60,8 @@
 Phase 2/3 扩展点：
 - collect 层（perf/ddr-perf）接入 predictor 上游
 - compare 引擎接入 predictor 下游
+
+画布在 `gui/`，评估调用同一套 `predict`，不经过 CLI。
 ```
 
 ## 4. 数据模型 (schema.py)
@@ -70,12 +72,14 @@ class Master(BaseModel):
     type: str                    # "can","spi","mipi_csi"...
     enabled: bool = True         # CAN 默认 false（6 款预设），用 --can-dbc 启用
     params: dict                 # 透传给对应 estimator
-    verify: bool = False
 
 class PipelineStage(BaseModel):
     name: str
-    read_factor: float
+    read_factor: float          # 多读几遍，不表示格式变化
     write_factor: float
+    format: str | None = None   # 本级输出格式；空则沿用输入格式
+    width: int | None = None    # 本级输出宽高；空则沿用输入尺寸
+    height: int | None = None
 
 class Pipeline(BaseModel):
     name: str
@@ -85,19 +89,31 @@ class Pipeline(BaseModel):
     source: Optional[Union[str, list[str]]]  # master 名 / pipeline 名 / 列表 / null
     params: dict
     stages: list[PipelineStage]
-    verify: bool = False
 
 class DDRChannel(BaseModel):
     name: str
-    theoretical_peak_mbps: float
+    controller_mt_s: float | None = None
+    controller_width_bits: int | None = None
+    controller_groups: int = 1
+    controller_type: str | None = None
+    module_mt_s: float | None = None
+    module_width_bits: int | None = None
+    module_groups: int = 1
+    module_type: str | None = None
     efficiency: float = 0.7
-    read_write_ratio: float | None = None
+    read_write_ratio: float | None = None  # 旧文件可能还带着，评估不再使用
+
+class IspVpac(BaseModel):
+    name: str          # 与 ISP 节点同名，例如 ISP0、ISP1
+    mpix_s: float      # 这一路每秒百万像素。TDA4VH 的 ISP0、ISP1 各 600
 
 class Topology(BaseModel):
     masters: list[Master]
     pipelines: list[Pipeline]
     ddr_channels: list[DDRChannel]
     alert_thresholds: dict = {"yellow": 0.6, "red": 0.8}
+    ui_lang: str | None = None     # 旧文件里可能还有。界面语言不写在拓扑里
+    isp_vpacs: list[IspVpac] = []  # 芯片上的 ISP。节点像素只和同名的那一路比
 
 class BandwidthEstimate(BaseModel):
     read_bw_mbps: float
@@ -126,20 +142,20 @@ def get_estimator(type_name: str) -> Estimator: ...
 
 | type | 输入 | 公式 |
 |---|---|---|
-| can (DBC) | dbc_path, bus_id | Σ(DLC×8 / cycle_time) bit/s ×1.3(帧开销) → MB/s |
-| can (load) | bitrate_mbps, load_pct | bitrate × load × 0.7(有效载荷) → MB/s |
+| can (报文文件) | dbc_path、标准、码率 | Σ(DLC×8 / cycle_time) bit/s ×1.3(帧开销) → MB/s。一份文件是一路，没有 bus id |
+| can (通用) | 标准、码率、load_pct | 数据相码率 × 负载 × 0.7(有效载荷) → MB/s。经典 CAN 最大 1 Mbps，CAN FD 仲裁最大 1 Mbps、数据相最大 8 Mbps |
 | spi | clock_mhz, xfer_bytes, xfer_hz | min(clock×1e6/8, xfer_bytes×xfer_hz) |
 | mipi_csi | w,h,fps,bpp,lanes,count | per_stream=w×h×fps×bpp/8；aggregate=per×count；校验 aggregate vs lane 上限 |
 | mipi_dsi | w,h,fps,bpp,lanes,count | 同上（DSI 读 DDR，CSI 写 DDR） |
 | usb | version, util_pct | nominal(480/5000/10000 Mbps) × util × 0.9 |
 | eth | link_gbps, util_pct, mtu | link×util×mtu/(mtu+38) |
 | flash | type, seq_r, seq_w, util, random_ratio | seq×util×[(1-r)+0.3r] |
-| isp | w,h,fps,bpp,count,stages[] | frame=w×h×fps×bpp×count/8；各级 R=frame×read_factor, W=frame×write_factor；serial 取 max，parallel 取 sum |
-| npu | params_mb, act_mb, inference_fps, tops_peak, sources[] | weight=params×fps；act=act_mb×2×fps；input=Σ各源(w×h×src_fps×bpp×count/8 或上游 write_bw)；read=weight+act/2+input |
+| isp | w,h,fps,format,stages[] | 一个 ISP 节点是一路画面，不乘 count。每级输入帧×read_factor、输出帧×write_factor；输出帧用本级格式和尺寸；serial 取 max，parallel 取 sum；交给下游的是最后一级画面。像素只和同名的芯片 ISP（ISP0、ISP1）比较 |
+| npu | params_mb, act_mb, inference_fps, tops_peak, sources[] | weight=params×fps；act=act_mb×2×fps；input=Σ各源(w×h×src_fps×bpp×count/8 或上游画面)；read=weight+act/2+input |
 | gpu | w,h,fps,bpp,overdraw | w×h×fps×bpp×overdraw/8 |
-| display | w,h,fps,bpp 或 source_input_mbps | w×h×fps×bpp/8（或上游 write_bw） |
-| venc | w,h,fps,bpp,codec 或 source_input_mbps | read=YUV=w×h×fps×bpp/8；write=bitstream=read/compression_ratio |
-| vdec | w,h,fps,bpp,codec | read=bitstream=YUV/ratio；write=YUV |
+| display | w,h,fps,format 或 source_input_mbps | w×h×fps×bpp/8（有上游时用上游画面） |
+| venc | w,h,fps,format,codec；pipeline 上游另给 source_input_mbps | read=上游画面（没有上游时用本级画面）；write=本级画面/compression_ratio |
+| vdec | w,h,fps,format,codec | write=本级画面；read=上游画面，没有上游时为本级画面/ratio |
 
 ### codec 压缩比（VENC/VDEC）
 `codec` 参数选默认压缩比（_coefficients.yaml 可配）：
@@ -148,17 +164,28 @@ def get_estimator(type_name: str) -> Estimator: ...
 - av1: 70
 - 单条覆盖：`params.compression_ratio: 40`
 
+### 像素格式
+各模块共用 `src/buseval/estimators/formats.py`。NV12、NV21、I420、YV12 与 YUV420 都是 12 位；YUYV、UYVY、NV16 与 YUV422 都是 16 位；RGB565 是 16 位；BGR888 是 24 位；BGRA8888、ARGB8888 是 32 位。P010 是 10 位装在 16 位里的 4:2:0，按 24 位计。`custom` 用手填的 bpp。
+
+### 界面字段
+模块位置 `ui_x`、`ui_y` 写在同一份 YAML 里。界面语言记在本机，打开项目不改语言。DDR 通道也可以带 `ui_x`、`ui_y`。CLI 预测不读 `ui_` 开头的键，拓扑哈希也会去掉它们。打开拓扑或预设不自动评估。保存前要过校验：有错误，或预测算不下去，就不写文件。警告不挡住保存。评估结果不写回文件。
+
+画布上的 DDR 节点就是拓扑里已有的那一路通道，不是模块库里的新类型。没有打开工程时不画它。打开之后，卡片上只写可用带宽的数字，例如 35,840 MB/s；速率和位宽在双击打开的对话框里。顶栏只显示占用，双击不打开配置。网口、USB、CAN、SPI、存储，以及 GPU、VDEC，放下就用一条本色虚线连到 DDR。线的两头各有一个点，都可以沿卡片的边拖。CSI、ISP、VENC、DISP、NPU 不另拉虚线，画面入写成「CSI1 via DDR」。DSI 的入不写 via DDR，因为它不再读内存。画面线仍是实线贝塞尔，用源头模块自己的颜色，画在卡片下面。评估后模块按不同占比落在一条连续色档上，从品红经紫、蓝紫、天蓝淡到接近白；占比相同落在同一处。DDR 卡片和顶栏按占用率上色，不到黄阈值是绿，到了是黄，到了红阈值是红。评估后卡片右侧用大字居中写出这个占用率。
+
+VENC 可以连到 ETH。连上之后，ETH 的 DDR 读等于上游画面或码流，不再用链路速率 × 利用率另加一笔。链路装不下这条流时记一条红色假设。VENC 自己的写和 ETH 的读是两次 DMA，两条虚线都在。没有上游的 USB、CAN、ETH 仍按各自的利用率估算。
+
 ## 7. Predictor 算法（含 p2p 拓扑排序）
 
-1. 先算所有 enabled master 的 estimate
+1. 先算不吃 pipeline 上游的 enabled master
 2. 对 pipeline 做拓扑排序（DFS）：被 source 的 pipeline 先算
 3. 环检测：A→B→A 报错 `cyclic pipeline dependency`
 4. 每个 pipeline：
-   - master source → 继承图像尺寸（w/h/fps/bpp/count），下游自算帧流
-   - pipeline source → 拿上游 write_bw 作 source_input_mbps（pipeline 输出已转格式/缩放，无尺寸可继承）
-   - 多源 [CSI0, ISP0] → master 贡献尺寸 + pipeline 贡献 write_bw，分别处理后累加
-5. 全局汇总：R_demand = Σ read，W_demand = Σ write
-6. 每项 assumptions 合并进全局段（带 level 分级）
+   - master source → 继承图像尺寸（w/h/fps/bpp，ISP 不继承 count），下游自算帧流
+   - pipeline source → 非 DSI 拿上游画面（`output_mbps`，没有则 `write_bw`）；DSI 拿上游读带宽，自己的 DDR 为 0
+   - 多源 [CSI0, ISP0] → master 贡献尺寸 + pipeline 贡献画面，分别处理后累加
+5. 接到 pipeline 上的 ETH：DDR 读 = 那条上游画面或码流，不再叠加 link × util
+6. 全局汇总：R_demand = Σ read，W_demand = Σ write
+7. 每项 assumptions 合并进全局段（带 level 分级）。不再写「input from」；来源已经画在画布上
 
 ## 8. Margin 评估
 
@@ -171,59 +198,65 @@ available       = effective_peak × efficiency
 ```
 - MT/s 已包含 DDR 双沿（Double Data Rate），不再乘 2
 - 芯片 DDR 控制器上限 vs 外贴颗粒带宽，取最小值
+- 两边速率没齐时有效峰值为 0
 - bottleneck 标注："controller" / "module" / "matched"
-- 向后兼容：只写 `theoretical_peak_mbps` 时 effective = theoretical（旧行为）
 
-### 利用率与告警
-- `available_R = available × read_ratio`，`available_W = available × (1 - read_ratio)`
-- `util_R = R_demand / available_R`，`util_W` 同理
-- 告警：`util ≥ red(0.8)` → CRITICAL；`≥ yellow(0.6)` → WARN；否则 OK
-- R/W 失衡：`|util_R - util_W| / max(...)` > 0.3 标记 IMBALANCE
-- DDR 打满告警：`util ≥ 0.8` 进 assumptions 段（RED 级）
+### 占用率与告警
+- `R-util = R_demand / available`，`W-util = W_demand / available`
+- `occupancy = (R_demand + W_demand) / available`，等于两侧相加
+- 三列百分比用同一条线涂色：不到 yellow 绿，到了黄，到了 red 红
+- 裁决只看 occupancy：`≥ red(0.8)` → CRITICAL；`≥ yellow(0.6)` → WARN；否则 OK
+- DDR 打满告警：`occupancy ≥ 0.8` 进 assumptions 段（RED 级）
+- 没有风险记录时，终端不打印 assumptions 段
 
 ## 9. Assumptions 审计（分级）
 
 每条 assumption 带 level：
-- **RED**：激进 util>0.9 / lane 超 lane 上限 / NPU tops 超限 / DDR util>0.8
+- **RED**：激进 util>0.9 / lane 超 lane 上限 / NPU tops 超限 / DDR occupancy≥0.8
 - **YEL**：非典型 stage 系数 / NPU fps < source fps / CAN load>0.7
-- **INFO**：source 连线（声明事实）+ 未验证默认值（verify=true，来源说明非风险）
+- **INFO**：估算器仍声明的事实。来源连线画在画布上，不再写进这里
 
 每项合并成一行（避免重复），取最严重 level 作行级 level。终端 Lv 列染色（RED=红 / YEL=黄 / i=暗青）。
 
-> Phase 3 计划：verify 升级为动态验证状态——实测匹配的 item 自动从 INFO 变 OK（绿），不匹配变 RED。
-
 ## 10. CAN 健康报告（DBC 直读单独模式）
 
-输入：单个 DBC 文件，不带 SoC。
-输出（不含 DDR 评估）：
-- 每总线：bitrate、总负载 kbps、负载率%
-- Top-N 报文贡献（按 DLC×频率排序）
-- 最坏帧延迟估算：`延迟 ≈ (最坏仲裁 + 最长报文传输) / (1 - 负载率)`
-- 过载建议：>0.7 → 升级 bitrate / 拆分总线；>0.9 → 必须重构
-- 支持 CAN-FD：`--can-bitrate 2000`（2Mbps），DBC 内 64 字节大帧自动处理
+一份 DBC 是一路 CAN，不按文件里的总线名拆开。标准二选一：经典 CAN（ISO 11898，码率最大 1000 kbps，报文最长 8 字节），或 CAN FD（仲裁最大 1000 kbps，数据相最大 8000 kbps，报文长度只允许 0–8、12、16、20、24、32、48、64）。负载按数据相码率（经典 CAN 就是那一档码率）去除报文比特。报文长度不合当前标准时不算负载。界面先写负载和最坏延迟，这句按不到 60% 绿、到 60% 黄、到 80% 红上色。下面五行演算用默认字色。括号用数据码率或码率，与上面的输入框一致。负载和最坏延迟写在各自等号前面。每一行有一句提示。双击画布上的 CAN 打开这一页，报文文件和通用二选一，确定后写回该节点。菜单里打开同一页只查看文件，不写回。
 
 ## 10.5. GMSL 链路带宽（独立工具）
 
 独立于 SoC topology，计算 GMSL 串行链路所需带宽。
 
 ### 公式
-```
-link_bw = width × height × fps × bpp × blanking × encoding_factor × overhead_factor
-          ÷ 1e6 → Mbps
-```
-- blanking 默认 1.2（20% 消隐，乘数形式）
-- encoding_factor 默认 1.15（8b/10b + 压缩有效近似）
-- overhead_factor 默认 1.067（FEC + 头 + 校验）
-- 三个系数在 `_coefficients.yaml` 的 `gmsl:` 段，可校准
+同轴（pixel mode）和 CSI 口分开算。
 
-### GMSL 链路等级推荐
-| 等级 | 带宽 |
+```
+PCLK     = 宽 × 高 × fps ×（heartbeat 开 ? blanking : 1）
+bpp_link = max(bpp, 9)
+link_bw  = PCLK × (bpp_link + crc) × encoding × (2048/2047) × fec
+csi_bw   = 宽 × 高 × fps × blanking × bpp
+```
+
+- blanking 默认 1.2。CSI 始终乘它。同轴只在 heartbeat 打开时乘它。摄像头进 CSI 解串器时 heartbeat 默认关。
+- RAW8 / EMB8 的同轴 bpp 先抬到 9。CSI 仍用真实 bpp。
+- 像素 CRC 默认开，+0.5 bpp。
+- 编码默认 9b/10b（10/9 = 1.1111）。可选 8b/10b（10/8 = 1.25）或 none（1）。
+- 包开销固定 2048/2047。
+- FEC 默认关。打开时乘 128/120 = 1.0667。GMSL3 始终乘这一项；FEC 已经打开时不再乘第二次。
+- 线速率在 `_coefficients.yaml` 的 `gmsl.link_tiers`。占用率 = 该档使用的链路带宽 / 线速率。
+
+### GMSL 链路等级
+| 档 | 线速率 |
 |---|---|
-| GMSL1 | 1.5 Gbps |
-| GMSL2 | 3.0 Gbps |
-| GMSL3 | 6.0 Gbps |
+| GMSL1 | 3.12 Gbps |
+| GMSL2 3G | 3 Gbps |
+| GMSL2 6G | 6 Gbps |
+| GMSL3 | 12 Gbps |
 
-每路显示推导明细（像素率→+blanking→+encoding→+overhead），对比三个等级标注 util% 和 ✓/✗，推荐最小满足等级（Best fit）。多路时汇总表显示 total + aggregate best fit（total 带宽 vs tier 容量）。
+四个色框按不到 0.6 绿、到 0.6 黄、到 0.8 红上色。装得下的最低档标推荐。界面只有一页：1 到 4 路共用一根同轴，同轴带宽是各路之和。只有 1 路时展开完整算式，多路时用乘积和合计。命令行用青色边框包住同一段文字，不打印 CSI 配置。
+
+CSI 配置用各路消隐后像素率之和。D-PHY lane 为 1–4，每 lane 速率再除以 2 得到时钟脚。C-PHY trio 为 1–3，符号率 = 每 trio 比特率 / 2.28。配置值按 0.1 Gbps 向上取整。超过 1.5 Gbps/lane 时提示 deskew。
+
+单路不落盘。多路 YAML 写入 blanking、heartbeat、encoding、fec、pixel_crc、phy、lanes，以及每路 name、width、height、fps、format。custom 才写 bpp。旧文件里的 encoding_factor / overhead_factor 不再参与计算。
 
 ### CLI
 ```bash
@@ -247,7 +280,6 @@ buseval predict --GMSL examples/gmsl_links.yaml
 - GPU/Display + source 连线（ISP0→DISP0）
 - DDR 类型/速率/通道数 → 理论峰值
 - **CAN 默认 enabled: false**（6 款非网关预设）；s32g（网关）保持启用
-- 所有参数标 `verify: true`（进 assumptions 审计）
 
 7 款：tda4vh / orin_nx / j5 / sa8155 / rk3588 / t527 / s32g
 
@@ -279,10 +311,11 @@ VDEC0 (独立回放, h265)
 ```
 DDR Bandwidth Report
 ══════════════════════════════════════════════════
-DDR0  peak 25600 MB/s  efficiency 0.7  available 17920
-  Read demand 12450 MB/s  util 69.5%  [WARN]
-  Write demand 8230 MB/s  util 45.9%  [OK]
-  R/W balance: 1.52  [OK]
+DDR0  available 35840
+  R-demand 6340 MB/s   R-util 17.7%
+  W-demand 3761 MB/s   W-util 10.5%
+  Occupancy 28.2%  [OK]
+  三个百分比按不到 0.6 绿、到 0.6 黄、到 0.8 红上色
 
 Top contributors (read+write):
   1. NPU0        4300 MB/s  20.5%  [from CSI0+ISP0]   ← source 名染色
@@ -292,9 +325,8 @@ Top contributors (read+write):
 Assumptions (verify before trusting):
   Lv   Item    Message
   RED  NPU0    aggressive util_pct=0.95
-  RED  DDR0    read util 96.4% >= 80% (DDR near full)
+  RED  DDR0    occupancy 96.4% >= 80% (DDR near full)
   YEL  CSI0    uses unverified default value
-  i    ISP0    input from CSI1
 ```
 
 ### 13.2 结构化 (report.yaml / report.json)
@@ -375,15 +407,21 @@ tests/
 
 ## 16. 依赖
 
-`pydantic>=2` `pyyaml` `rich` `cantools` `pytest`
+`pydantic>=2` `pyyaml` `rich` `cantools` `pytest`。图形界面额外需要 `PySide6`（`pip install -e '.[gui]'`）。
 
-## 17. 路线图（Phase 2-4）
+## 17. 路线图
 
-- **Phase 2**：collect 层（perf/ddr-perf 采集 + parser + CLI collect）
-- **Phase 3**：compare 引擎（偏差归因链）+ `buseval diff A B` scenario 对比 + verify 动态化（实测匹配的 item 自动从 INFO 变 OK，不匹配变 RED）
-- **Phase 4**：系数自校准（实测反推 read_factor）+ Web UI（FastAPI 暴露 engine）
+CLI 与 GUI 互不调用，交集只有拓扑 YAML。`buseval predict -t` 是 Phase 1 已有命令。
 
-## 18. 开放问题（待 Phase 1 后复盘）
+- **Phase 1（已冻结）**：PySide6 画布。菜单打开预设或 YAML，拖入模块，连线即 `source`，双击改参数，菜单「评估」在进程内调用 `predict`，模块在绿黄红以外按档变淡，DDR 按占用率显示绿、黄、红。
+- **阶段 A**：`buseval collect --platform arm_pc` 走 `collectors/arm_pmu.sh`（`perf stat`），写出 `meas.json`。`buseval compare -t topo.yaml -m meas.json` 与 GUI「导入实测」各自对比，不交换结果。
+- **阶段 B**：SoC DDR。平台清单再登记一个适配器；计数器已是命令或 sysfs 时用 shell，只有必须映射寄存器时才写 C。
+- **阶段 C**：板端 CAN（SocketCAN）与 GMSL（解串器），`kind` 分别为 `can_bus`、`gmsl_link`，文件格式不变。
+- 系数自校准不在本轮。
+
+会话层在 `session.py`：载入、保存、评估（预测 + 余量只算一次）。连线与环检测在 `engine/graph.py`。帧流字节率在 `estimators/frame.py`。假设等级由估算器直接给出。
+
+## 18. 开放问题（Phase 1 冻结后仍留着）
 
 - ISP 各 stage 系数是否需要按厂商校准？
 - NPU 估算用 TOPS 还是参数量为主？（当前两者都支持，tops 仅作 sanity check）

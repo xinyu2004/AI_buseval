@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments. The repo root was once used as a venv (bin/lib/pyvenv.cfg).
+.venv/
+venv/
+bin/
+lib/
+lib64
+include/
+pyvenv.cfg
+
+# Local measurement output
+meas.json

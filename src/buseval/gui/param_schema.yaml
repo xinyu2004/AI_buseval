@@ -1,0 +1,143 @@
+# Widget list for the double-click property dialog.
+# Keys match topology YAML. Choices for usb.version come from coefficients, not from here.
+# tip / tip_en are shown when the field is hovered or focused.
+can:
+  group: 外设
+  prefix: CAN
+  kind: master
+  defaults: {standard: can, bitrate_mbps: 0.5, arbitration_kbps: 500, data_kbps: 500, load_pct: 0.3, direction: both}
+  fields: []
+spi:
+  group: 外设
+  prefix: SPI
+  kind: master
+  defaults: {clock_mhz: 50, xfer_bytes: 512, xfer_hz: 1000}
+  fields:
+    - {key: clock_mhz, widget: float, tip: "SPI 时钟，单位 MHz。时钟决定这条总线理论上限。", tip_en: "SPI clock in MHz. This sets the bus ceiling."}
+    - {key: xfer_bytes, widget: int, tip: "每次传输的字节数。DDR 流量 ≈ 每次字节数 × 每秒次数。", tip_en: "Bytes in one transfer. DDR traffic is about this times transfers per second."}
+    - {key: xfer_hz, widget: float, tip: "每秒发起多少次传输。流量 ≈ 每次字节数 × 次数。", tip_en: "Transfers per second. Traffic is bytes times this rate."}
+    - {key: direction, widget: enum, choices: [both, tx, rx], default: both, tip: "both 读写各算一份。tx 只算读，rx 只算写。SPI 默认双向。", tip_en: "both counts read and write. tx is read only, rx is write only. SPI defaults to both."}
+mipi_csi:
+  group: 外设
+  prefix: CSI
+  kind: master
+  defaults: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4, count: 1}
+  fields:
+    - {key: width, widget: int, tip: "图像宽度，单位像素。和高度、帧率、格式一起决定写入 DDR 的带宽。", tip_en: "Image width in pixels. With height, fps, and format, this sets how much this port writes to DDR."}
+    - {key: height, widget: int, tip: "图像高度，单位像素。和宽度、帧率、格式一起决定带宽。", tip_en: "Image height in pixels. Together with width, fps, and format, this sets the bandwidth."}
+    - {key: fps, widget: float, tip: "帧率。下游若继承这一路，用的就是这个帧率。", tip_en: "Frame rate. A downstream block that inherits this port uses this fps."}
+    - {key: format, widget: format, default: raw12, tip: "像素格式。名单各模块共用，位数由格式算出。选 custom 后自己填 bpp。", tip_en: "Pixel format. Every module shares one list, and bits per pixel follow the format. custom lets you type bpp."}
+    - {key: lanes, widget: int, tip: "这一路 CSI 的数据 lane 数，只能是 1、2、3 或 4。用来检查链路是否装得下。", tip_en: "Data lanes on this CSI port: 1, 2, 3, or 4. Used to check whether the link can carry the stream."}
+    - {key: count, widget: int, tip: "挂在这一路物理 CSI 上的相机个数。带宽按这个倍数相乘，不会再占新的 CSI 口。", tip_en: "Cameras sharing this physical CSI port. Bandwidth is multiplied by this count; it does not add another CSI port."}
+usb:
+  group: 外设
+  prefix: USB
+  kind: master
+  defaults: {version: "3", util_pct: 0.3}
+  fields:
+    - {key: version, widget: enum, choices_from: usb.nominal_mbps, tip: "USB 版本，决定标称速率。和系数文件一致，目前是 2、3、3.2。", tip_en: "USB version, which selects the nominal rate. Matches the coefficient file: 2, 3, or 3.2."}
+    - {key: util_pct, widget: float, tip: "链路利用率，0 到 1。实际 DDR 流量 = 标称速率 × 利用率 × 协议效率。", tip_en: "Link utilization, 0 to 1. DDR traffic is nominal rate times utilization times protocol efficiency."}
+    - {key: direction, widget: enum, choices: [both, tx, rx], default: both, tip: "both 读写各算一份。tx 只算读 DDR，rx 只算写 DDR。", tip_en: "both counts read and write. tx is a DDR read, rx is a DDR write."}
+eth:
+  group: 外设
+  prefix: ETH
+  kind: master
+  defaults: {link_gbps: 1, util_pct: 0.3, mtu: 1500}
+  fields:
+    - {key: link_gbps, widget: float, tip: "网口速率，单位 Gbps。千兆口填 1。", tip_en: "Link speed in Gbps. Use 1 for a gigabit port."}
+    - {key: util_pct, widget: float, tip: "没有上游时，DDR 流量 ≈ 速率 × 利用率，再扣掉帧头。接到 VENC 等上游后，读带宽改按那条码流，不再叠加利用率。", tip_en: "With no upstream, DDR traffic is about link speed times this, after frame-header overhead. Once a pipeline such as VENC is connected, the read is that stream and utilization is not added."}
+    - {key: mtu, widget: int, tip: "最大帧长，单位字节。帧越小，包头开销越大。", tip_en: "Maximum frame size in bytes. Smaller frames mean more header overhead."}
+    - {key: direction, widget: enum, choices: [both, tx, rx], default: both, tip: "both 读写各算一份。tx 只算读 DDR，rx 只算写 DDR。", tip_en: "both counts read and write. tx is a DDR read, rx is a DDR write."}
+flash:
+  group: 外设
+  prefix: FLASH
+  kind: master
+  defaults: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1200, util_pct: 0.2, random_ratio: 0.2}
+  fields:
+    - {key: type, widget: enum, choices: [nand, emmc, ufs], tip: "存储介质：nand、emmc 或 ufs。", tip_en: "Storage medium: nand, emmc, or ufs."}
+    - {key: seq_read_mbps, widget: float, tip: "顺序读的标称速度，单位 MB/s。再乘利用率，并按随机比例打折。", tip_en: "Nominal sequential read in MB/s. Scaled by utilization, then reduced for random access."}
+    - {key: seq_write_mbps, widget: float, tip: "顺序写的标称速度，单位 MB/s。算法和读一样。", tip_en: "Nominal sequential write in MB/s. Scaled the same way as the read."}
+    - {key: util_pct, widget: float, tip: "实际用到标称带宽的比例，0 到 1。", tip_en: "Fraction of the nominal bandwidth actually used, 0 to 1."}
+    - {key: random_ratio, widget: float, tip: "随机访问占全部访问的比例，0 到 1。随机越多，有效带宽越低。", tip_en: "Fraction of accesses that are random, 0 to 1. More random traffic lowers effective bandwidth."}
+isp:
+  group: Pipeline
+  prefix: ISP
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12}
+  stages:
+    - {name: bayer, format: raw12, read_factor: 1.0, write_factor: 1.0}
+  fields:
+    - {key: mode, widget: enum, choices: [serial, parallel], target: mode, tip: "serial：各级不会同时顶满，读写取最大的那一级。parallel：各级同时进行，读写相加。", tip_en: "serial uses the busiest stage. parallel adds every stage together."}
+    - {key: stages, widget: stages, tip: "每一级的输出格式和输出分辨率。打开时填入这一路当前的宽高，不改就保持这组数字。读倍数和写倍数表示把这一帧多碰几遍，不表示格式变化。", tip_en: "Each stage's output format and size. The dialog fills the current width and height; leaving them keeps those numbers. Read and write factors are extra passes, not a format change."}
+npu:
+  group: Pipeline
+  prefix: NPU
+  kind: pipeline
+  default_mode: parallel
+  defaults: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8, tops_used: 6}
+  fields:
+    - {key: mode, widget: enum, choices: [serial, parallel], target: mode, tip: "serial：多路输入不叠加。parallel：多路输入的带宽相加。", tip_en: "serial does not add the inputs together. parallel adds every input's bandwidth."}
+    - {key: params_mbytes, widget: float, tip: "权重体积，单位 MB。按 inference_fps 换算成每秒要读多少。", tip_en: "Weight size in MB, turned into MB/s using inference_fps."}
+    - {key: activation_mbytes, widget: float, tip: "中间激活体积，单位 MB。和输入图像不是同一笔流量。", tip_en: "Intermediate activation size in MB. This is separate from the input image traffic."}
+    - {key: inference_fps, widget: float, tip: "每秒推理次数。可以低于相机帧率，低的时候会给出警告。", tip_en: "Inferences per second. It may be lower than the camera fps; that raises a warning."}
+    - {key: tops_peak, widget: float, locked: true, tip: "芯片标称算力，单位 TOPS。这是 SoC 规格，不能在这里改。实际占用填 tops_used。", tip_en: "Rated compute in TOPS. This is the SoC spec and cannot be edited here. Put the workload in tops_used."}
+    - {key: tops_used, widget: float, tip: "这路模型实际用到的算力。接近峰值时会标红。", tip_en: "Compute this model actually uses. Near the peak is marked red."}
+venc:
+  group: Pipeline
+  prefix: VENC
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 30, format: yuv422, bpp: 16, codec: h265}
+  fields:
+    - {key: width, widget: int, tip: "编码输出宽度。接了上游时，读带宽用上游画面；码流按这里的宽、高、帧率和格式，再除以压缩比。", tip_en: "Encoded output width. With an upstream, the read uses that picture. The bitstream uses this width, height, fps, and format, divided by the compression ratio."}
+    - {key: height, widget: int, tip: "编码输出高度。和宽度、帧率、格式一起决定码流所对应的原始帧。", tip_en: "Encoded output height. With width, fps, and format, this sets the raw frame behind the bitstream."}
+    - {key: fps, widget: float, tip: "每秒编码多少帧。码流按这个帧率算。", tip_en: "Frames encoded per second. The bitstream uses this rate."}
+    - {key: format, widget: format, default: yuv422, tip: "编码输出的像素格式。名单各模块共用。选 custom 后自己填 bpp。", tip_en: "Encoded picture format. Every module shares one list. custom lets you type bpp."}
+    - {key: count, widget: int, default: 1, tip: "同时编码的路数。没有上游时，原始码流按这个倍数相乘。", tip_en: "Streams encoded together. With no upstream, the raw stream is multiplied by this count."}
+    - {key: codec, widget: enum, choices: [h264, h265, av1], tip: "编码标准。h264 即 H.264，h265 即 H.265。换编码时，压缩比会带出该编码的常用值。", tip_en: "Codec. h264 is H.264, h265 is H.265. Changing it fills the typical compression ratio for that codec."}
+    - {key: compression_ratio, widget: float, optional: true, tip: "原始码流除以压缩码流。h264 常用 30，h265 常用 50，av1 常用 70。越大，写出的码流越小。留空则用所选编码的常用值。", tip_en: "Raw stream divided by the bitstream. Typical values are 30 for h264, 50 for h265, 70 for av1. Larger means a smaller bitstream. Blank uses the codec typical."}
+vdec:
+  group: Pipeline
+  prefix: VDEC
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 30, format: yuv422, bpp: 16, codec: h265}
+  fields:
+    - {key: width, widget: int, tip: "解码后图像宽度。写出的是这个尺寸的原始图像。没有上游时，读入的码流是这份图像除以压缩比。", tip_en: "Width after decode. The written picture uses this size. With no upstream, the bitstream read is that picture divided by the compression ratio."}
+    - {key: height, widget: int, tip: "解码后图像高度。和宽度、格式一起决定写出的原始图像。", tip_en: "Height after decode. With width and format, this sets the raw picture written out."}
+    - {key: fps, widget: float, tip: "每秒解码多少帧。原始图像带宽按这个帧率算。", tip_en: "Frames decoded per second. The raw picture bandwidth uses this rate."}
+    - {key: format, widget: format, default: yuv422, tip: "解码后的像素格式。名单各模块共用。选 custom 后自己填 bpp。", tip_en: "Picture format after decode. Every module shares one list. custom lets you type bpp."}
+    - {key: count, widget: int, default: 1, tip: "同时解码的路数。原始图像带宽按这个倍数相乘。", tip_en: "Streams decoded together. The raw picture bandwidth is multiplied by this count."}
+    - {key: codec, widget: enum, choices: [h264, h265, av1], tip: "编码标准。换编码时，压缩比会带出该编码的常用值。", tip_en: "Codec. Changing it fills the typical compression ratio for that codec."}
+    - {key: compression_ratio, widget: float, optional: true, tip: "原始码流除以压缩码流。解码时读入的是压缩码流，写出的是原始图像。h265 常用 50。", tip_en: "Raw stream divided by the bitstream. Decode reads the bitstream and writes the raw picture. h265 is typically 50."}
+gpu:
+  group: Pipeline
+  prefix: GPU
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 60, format: rgba8888, bpp: 32, overdraw: 3}
+  fields:
+    - {key: width, widget: int, tip: "绘制目标宽度，单位像素。和高度、帧率、格式、overdraw 相乘得到读写带宽。", tip_en: "Render target width in pixels. Bandwidth is width × height × fps × format × overdraw."}
+    - {key: height, widget: int, tip: "绘制目标高度，单位像素。和宽度一起决定一帧有多大。", tip_en: "Render target height in pixels. Together with width, this sets the size of one frame."}
+    - {key: fps, widget: float, tip: "每秒画多少帧。带宽按这个帧率相乘。", tip_en: "Frames drawn per second. Bandwidth is multiplied by this rate."}
+    - {key: format, widget: format, default: rgba8888, tip: "绘制格式。名单各模块共用。选 custom 后自己填 bpp。", tip_en: "Render format. Every module shares one list. custom lets you type bpp."}
+    - {key: overdraw, widget: float, tip: "同一像素平均画几次。3 表示读写大约是一整帧的 3 倍。", tip_en: "How many times a pixel is drawn on average. 3 means about three full-frame read/write passes."}
+display:
+  group: Pipeline
+  prefix: DISP
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 60, format: rgba8888, bpp: 32}
+  fields:
+    - {key: width, widget: int, tip: "屏幕宽度。没有上游时用这里的尺寸；有上游时，读的是上游画面。", tip_en: "Panel width. Used when there is no upstream. With an upstream, the read is that picture."}
+    - {key: height, widget: int, tip: "屏幕高度。没有上游时和宽度、帧率、格式一起算读带宽。", tip_en: "Panel height. With no upstream, it joins width, fps, and format for the read."}
+    - {key: fps, widget: float, tip: "屏幕每秒刷新多少帧。没有上游时，读带宽按这个帧率算。", tip_en: "Panel refreshes per second. With no upstream, the read bandwidth uses this rate."}
+    - {key: format, widget: format, default: rgba8888, tip: "帧缓冲格式。名单各模块共用。选 custom 后自己填 bpp。", tip_en: "Framebuffer format. Every module shares one list. custom lets you type bpp."}
+mipi_dsi:
+  group: Pipeline
+  prefix: DSI
+  kind: pipeline
+  defaults: {width: 1920, height: 1080, fps: 60, format: rgb888, bpp: 24, lanes: 4}
+  fields:
+    - {key: width, widget: int, tip: "面板宽度。接在 Display 后面时，DDR 不再重复计算，这里主要用于对照。", tip_en: "Panel width. After a Display, DDR is not counted again; this is mainly for reference."}
+    - {key: height, widget: int, tip: "面板高度。接在 Display 后面时不计入 DDR，只用来核对这条链路。", tip_en: "Panel height. After a Display this is not added to DDR; it only checks the link."}
+    - {key: fps, widget: float, tip: "面板每秒刷新多少帧。用来和 lane 数一起看物理链路是否装得下。", tip_en: "Panel refreshes per second. Together with the lane count, this checks whether the physical link can carry the picture."}
+    - {key: format, widget: format, default: rgb888, tip: "面板格式。名单各模块共用。选 custom 后自己填 bpp。", tip_en: "Panel format. Every module shares one list. custom lets you type bpp."}
+    - {key: lanes, widget: int, tip: "DSI 数据 lane 数，用来检查这条物理链路是否装得下。", tip_en: "DSI data lanes, used to check whether the physical link can carry the stream."}
+    - {key: count, widget: int, tip: "挂在这一路 DSI 上的屏个数。带宽按这个倍数相乘，不会再占新的 DSI 口。", tip_en: "Panels on this DSI port. Bandwidth is multiplied by this count; it does not add another DSI port."}

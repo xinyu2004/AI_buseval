@@ -6,27 +6,26 @@ parameter; compression_ratio can be overridden per instance.
 """
 from __future__ import annotations
 
+from ..formats import resolve_bpp
+from ..frame import frame_stream_mbps
 from ..registry import Estimator, register, get_coefficients
 from ...schema import BandwidthEstimate
 
 
-def _frame_stream_mbps(params: dict, coeffs: dict) -> tuple[float, dict]:
-    """Compute the raw YUV frame stream (MB/s). Either from explicit width/height/
-    fps/bpp, or from a pre-computed source_input_mbps (when sourced from a pipeline
-    whose output bandwidth is already known)."""
-    if "source_input_mbps" in params:
-        mbps = float(params["source_input_mbps"])
-        return mbps, {
-            "source_input_mbps": round(mbps, 4),
-            "source": params.get("source"),
-        }
+def _output_frame(params: dict, coeffs: dict) -> tuple[float | None, dict]:
+    """This block's own picture: width × height × fps × format bpp."""
+    if not all(k in params and params[k] not in (None, "") for k in ("width", "height", "fps")):
+        return None, {}
+    bpp = resolve_bpp(params, float(coeffs["default_bpp"]))
     w = int(params["width"])
     h = int(params["height"])
     fps = float(params["fps"])
-    bpp = float(params.get("bpp", coeffs["default_bpp"]))
     count = int(params.get("count", 1))
-    mbps = w * h * fps * bpp * count / 8.0 / 1e6
-    return mbps, {"width": w, "height": h, "fps": fps, "bpp": bpp, "count": count}
+    mbps = frame_stream_mbps(w, h, fps, bpp, count)
+    dims = {"width": w, "height": h, "fps": fps, "bpp": bpp, "count": count}
+    if params.get("format"):
+        dims["format"] = params["format"]
+    return mbps, dims
 
 
 def _resolve_compression(params: dict, coeffs: dict) -> tuple[float, str]:
@@ -48,12 +47,21 @@ def _resolve_compression(params: dict, coeffs: dict) -> tuple[float, str]:
 class VencEstimator(Estimator):
     def estimate(self, params: dict) -> BandwidthEstimate:
         coeffs = get_coefficients()["venc"]
-        frame_mbps, dims = _frame_stream_mbps(params, coeffs)
+        picture, dims = _output_frame(params, coeffs)
         ratio, codec = _resolve_compression(params, coeffs)
-        read = frame_mbps
-        write = frame_mbps / ratio
-        if "source_input_mbps" in dims:
-            dom = f"VENC {codec} (1:{ratio:.0f}) from {dims['source']}"
+        upstream = params.get("source_input_mbps")
+        if upstream is not None:
+            read = float(upstream)
+            raw = picture if picture is not None else read
+            dims = {**dims, "source_input_mbps": round(read, 4), "source": params.get("source")}
+        else:
+            if picture is None:
+                raise ValueError("VENC needs width, height, and fps")
+            read = picture
+            raw = picture
+        write = raw / ratio
+        if upstream is not None:
+            dom = f"VENC {codec} (1:{ratio:.0f}) from {params.get('source')}"
         else:
             dom = f"VENC {dims['width']}x{dims['height']}@{dims['fps']} {codec} (1:{ratio:.0f})"
         return BandwidthEstimate(
@@ -64,7 +72,7 @@ class VencEstimator(Estimator):
                 **dims,
                 "codec": codec,
                 "compression_ratio": ratio,
-                "raw_frame_mbps": round(frame_mbps, 4),
+                "raw_frame_mbps": round(raw, 4),
                 "bitstream_mbps": round(write, 4),
                 "source": params.get("source"),
                 "sources": params.get("sources"),
@@ -78,12 +86,19 @@ class VencEstimator(Estimator):
 class VdecEstimator(Estimator):
     def estimate(self, params: dict) -> BandwidthEstimate:
         coeffs = get_coefficients()["vdec"]
-        frame_mbps, dims = _frame_stream_mbps(params, coeffs)
+        picture, dims = _output_frame(params, coeffs)
         ratio, codec = _resolve_compression(params, coeffs)
-        read = frame_mbps / ratio
-        write = frame_mbps
-        if "source_input_mbps" in dims:
-            dom = f"VDEC {codec} (1:{ratio:.0f}) from {dims['source']}"
+        upstream = params.get("source_input_mbps")
+        if picture is None and upstream is None:
+            raise ValueError("VDEC needs width, height, and fps")
+        write = picture if picture is not None else float(upstream)
+        if upstream is not None:
+            read = float(upstream)
+            dims = {**dims, "source_input_mbps": round(read, 4), "source": params.get("source")}
+        else:
+            read = write / ratio
+        if upstream is not None:
+            dom = f"VDEC {codec} (1:{ratio:.0f}) from {params.get('source')}"
         else:
             dom = f"VDEC {dims['width']}x{dims['height']}@{dims['fps']} {codec} (1:{ratio:.0f})"
         return BandwidthEstimate(
@@ -94,7 +109,7 @@ class VdecEstimator(Estimator):
                 **dims,
                 "codec": codec,
                 "compression_ratio": ratio,
-                "raw_frame_mbps": round(frame_mbps, 4),
+                "raw_frame_mbps": round(write, 4),
                 "bitstream_mbps": round(read, 4),
                 "source": params.get("source"),
                 "sources": params.get("sources"),

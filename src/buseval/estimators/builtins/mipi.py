@@ -13,8 +13,10 @@ Three modes:
 """
 from __future__ import annotations
 
+from ..formats import resolve_bpp
+from ..frame import frame_stream_mbps
 from ..registry import Estimator, register, get_coefficients
-from ...schema import BandwidthEstimate
+from ...schema import BandwidthEstimate, note
 
 
 @register("mipi_csi")
@@ -48,8 +50,11 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
         assumptions = []
         if carried_mbps > lane_cap_mbps:
             assumptions.append(
-                f"carried {carried_mbps:.1f} MB/s exceeds {lanes}-lane capacity "
-                f"{lane_cap_mbps:.1f} MB/s"
+                note(
+                    f"carried {carried_mbps:.1f} MB/s exceeds {lanes}-lane capacity "
+                    f"{lane_cap_mbps:.1f} MB/s",
+                    "red",
+                )
             )
 
         return BandwidthEstimate(
@@ -71,15 +76,15 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
     w = int(params["width"])
     h = int(params["height"])
     fps = float(params["fps"])
-    bpp = float(params.get("bpp", 8))
+    bpp = resolve_bpp(params, 8)
     lanes = int(params.get("lanes", 1))
     count = int(params.get("count", 1))
     if count < 1:
         raise ValueError(f"mipi count must be >= 1, got {count}")
 
     frame_bytes = w * h * bpp / 8.0
-    per_stream_mbps = frame_bytes * fps / 1e6  # MB/s per stream
-    aggregate_mbps = per_stream_mbps * count   # total across all VC streams
+    per_stream_mbps = frame_stream_mbps(w, h, fps, bpp, 1)
+    aggregate_mbps = frame_stream_mbps(w, h, fps, bpp, count)
 
     lane_cap_key = "dsi_lane_capacity_gbps" if is_dsi else "lane_capacity_gbps"
     lane_cap_gbps = coeffs[lane_cap_key]
@@ -88,8 +93,11 @@ def _estimate(params: dict, is_dsi: bool) -> BandwidthEstimate:
     assumptions = []
     if aggregate_mbps > lane_cap_mbps:
         assumptions.append(
-            f"aggregate {aggregate_mbps:.1f} MB/s ({count} streams) exceeds "
-            f"{lanes}-lane capacity {lane_cap_mbps:.1f} MB/s"
+            note(
+                f"aggregate {aggregate_mbps:.1f} MB/s ({count} streams) exceeds "
+                f"{lanes}-lane capacity {lane_cap_mbps:.1f} MB/s",
+                "red",
+            )
         )
 
     # CSI = input to DDR (write dominant); DSI = output from DDR (read dominant)

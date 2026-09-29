@@ -2,29 +2,28 @@
 
 # buseval — SoC 带宽评估工具
 
-预测和测量多核异构 SoC 的 DDR 带宽是否足够，覆盖外设（CAN/SPI/MIPI/USB/ETH/FLASH）与内部 pipeline（ISP/NPU/GPU/Display），并比对预测值与实测值。
+在板子还能改的时候把 DDR 定下来。芯片上有了实测，再把估算拿回去对。
 
 ## 为什么需要
 
-现代 SoC 是多核异构系统，外设和加速器众多。项目前期往往靠经验估带宽，实测阶段才发现 DDR 不够，返工代价大。buseval 把"前期预测"和"实测对比"做成可重复、可审计的工程化流程。
+位宽、颗粒速率和用几颗，一落板就改不动。带宽不够，先丢帧、再改板。带宽留得太多，每出一台都在为用不上的内存付钱。buseval 用来在设计还开着的时候做这个选择，也用来在芯片能够测量之后再核一次。
 
 ## 总目标
 
-1. **前期预测**：输入使用场景参数（DBC、分辨率/fps、bitrate/load、TOPS…），引擎估算各 master/pipeline 的读写带宽，汇总对比 DDR 可用带宽，给出余量和告警。
-2. **实测采集**：通过 `perf` / `ddr-perf` 读取芯片实测带宽。
-3. **预测 vs 实测对比**：量化偏差，归因到参数或公式，迭代校准。
+1. **定板之前**：把场景写进来，摄像头、DBC、码率、TOPS。引擎把各模块的读写加总，对着这块板实际给得出的 DDR，标出谁在吃带宽。
+2. **上板之后**：从芯片上把同一份带宽读回来。
+3. **有了实测**：两边摆在一起，看模型偏在哪里，把内存停在够用的那一档。
 
-## 现有目标（Phase 1）
+## Phase 1（已冻结）
 
-仅做**前期预测**闭环，不做采集与对比。具体：
+前期预测，命令行和画布都在里面。采集和对比留在路线图。
 
-- 可插拔 estimator 引擎，内置 11 类外设/pipeline 估算器
-- 三种入口：DBC 直读（CAN 健康报告）、SoC 预设、YAML 菜单
-- 7 款主流芯片预设
-- 假样例 DBC + 完整菜单模板
-- 报告：Top-N 贡献、读写分离、assumptions 审计、breakdown 一句话注解
-- CAN 健康报告（负载率/Top 报文/最坏帧延迟/过载建议）
-- `lint` 漏项检查
+- 14 个内置估算器
+- 入口：SoC DDR 拓扑（空白画布、常用芯片或私有芯片）、CAN 健康报告、GMSL 链路
+- 7 颗常用芯片、样例 DBC、完整菜单模板
+- 报告：贡献者、读写需求、R-util / W-util / 占用率，三条百分比同一套绿黄红。裁决看占用率。没有风险记录时不打印 assumptions
+- 画布：拖入模块、连 `source`、进程内评估。DDR 卡片用绿、黄、红写出占用率
+- `lint` 查漏项和矛盾
 
 ## 快速开始
 
@@ -35,7 +34,7 @@ pip install -e .
 buseval predict --soc tda4vh
 ```
 
-![SoC 带宽报告](result/SOC.png)
+![SoC 带宽报告](./gallery/SOC.png)
 
 ```bash
 # 2. CAN-FD 健康报告（2 Mbps）
@@ -46,7 +45,7 @@ buseval predict --soc tda4vh \
     --can-dbc CAN2=examples/sample_heavy.dbc
 ```
 
-![CAN 健康报告](result/CAN.png)
+![CAN 健康报告](./gallery/CAN.png)
 
 ```bash
 # 3. GMSL 链路带宽（独立工具，单路）
@@ -55,7 +54,7 @@ buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
 buseval predict --GMSL examples/gmsl_links.yaml
 ```
 
-![GMSL 链路带宽报告](result/GMSL.png)
+![GMSL 链路带宽报告](./gallery/GMSL.png)
 
 ```bash
 # 4. 自配 YAML
@@ -64,12 +63,42 @@ buseval lint my.yaml
 buseval predict -t my.yaml
 ```
 
+## 图形界面
+
+CLI 和 GUI 互不调用，共用同一份拓扑 YAML。`buseval predict -t` 仍是第一阶段的命令。
+
+```bash
+pip install -e '.[gui]'
+buseval gui
+```
+
+启动时先选要评估的类型。
+
+- **SoC DDR 拓扑**：空白画布、常用芯片，或一份私有芯片文件。画布左侧是模块库。拖入模块，连线写入 `source`，双击节点改参数，双击 DDR 卡片改通道。下方 DDR 条只显示状态。菜单「评估」在界面进程里计算。模块按读写占比变深，DDR 卡片用绿、黄、红写出占用率。保存后的 YAML 仍可用 `buseval predict -t` 再跑。
+- **CAN 健康报告**和 **GMSL 链路**从同一个选择窗口打开，也在文件菜单里。它们不进这张拓扑图。
+
+GMSL 是一页：一根同轴上最多四路摄像头、链路公式，以及等级。上面的命令行面板是同一套计算。
+
+![GMSL 链路界面](./gallery/gmsl-gui.png)
+
+## 实测
+
+采集器按平台选择，产出都是 `meas.json`。基础 ARM PC 用 `src/buseval/collectors/arm_pmu.sh` 调 `perf`。板上能用 shell 读计数器就用 shell，不必先写成 C。
+
+```bash
+buseval collect --platform arm_pc -o meas.json
+buseval compare -t my.yaml -m meas.json
+```
+
+GUI 用「实测 → 导入实测」读同一份文件。对比在各自进程里完成，不把 CLI 的输出交给 GUI。
+
 ## 路线图
 
-- **Phase 1**：前期预测闭环（当前）
-- **Phase 2**：实测采集（`perf` / `ddr-perf`）
-- **Phase 3**：预测 vs 实测对比 + 归因链 + `scenario diff`
-- **Phase 4**：系数自校准 + Web UI
+- **Phase 1（已冻结）**：命令行和界面都覆盖 SoC DDR、CAN 健康报告、GMSL 链路。DDR 占用率显示绿、黄、红
+- **阶段 A**：基础 ARM PC 上用 `perf` 采集 CPU 内存带宽，和预测对比
+- **阶段 B**：SoC DDR 计数器（先 TDA4VH），能用 shell 就不写 C
+- **阶段 C**：板端 CAN / GMSL，仍写 `meas.json`
+- 系数自校准仍在后面，不在本轮
 
 ## 支持的估算器
 
@@ -134,7 +163,7 @@ pipelines:
 `codec` 选默认压缩比（可在 `_coefficients.yaml` 配置）：h264=30、h265=50、av1=70。
 单条覆盖用 `params.compression_ratio: 40`。
 
-## 支持的 SoC 预设
+## 常用芯片
 
 TI TDA4VH / NVIDIA Orin NX / 地平线 J5 / 高通 SA8155 / 瑞芯微 RK3588 / 全志 T527 / NXP S32G
 

@@ -37,25 +37,19 @@ class DbcBus:
 
 
 def parse_dbc(dbc_path: str, bitrate_kbps: float | None = None) -> list[DbcBus]:
-    """Parse a DBC file. Returns a list of DbcBus. Bitrate must be supplied
-    externally (DBC does not reliably encode it). If bitrate_kbps is None,
-    the default from _coefficients.yaml is used for all buses."""
+    """Parse one DBC as one CAN bus. Bitrate comes from the caller; a DBC does not carry it reliably."""
     import cantools
 
     coeffs = get_coefficients()["can"]
     default_bitrate = bitrate_kbps or coeffs["default_bitrate_kbps"]
+    bus = DbcBus(name="default", bitrate_kbps=float(default_bitrate))
 
     db = cantools.database.load_file(dbc_path)
-    buses: dict[str, DbcBus] = {}
-
     for msg in db.messages:
-        bus_name = getattr(msg, "bus", None) or "default"
-        if bus_name not in buses:
-            buses[bus_name] = DbcBus(name=bus_name, bitrate_kbps=float(default_bitrate))
         cycle = msg.cycle_time or 0
         payload_bits = msg.length * 8
         bps = (payload_bits * (1000.0 / cycle)) if cycle and cycle > 0 else 0.0
-        buses[bus_name].messages.append(
+        bus.messages.append(
             DbcMessage(
                 name=msg.name,
                 frame_id=f"0x{msg.frame_id:X}",
@@ -65,6 +59,5 @@ def parse_dbc(dbc_path: str, bitrate_kbps: float | None = None) -> list[DbcBus]:
             )
         )
 
-    for b in buses.values():
-        b.messages.sort(key=lambda m: m.bps, reverse=True)
-    return list(buses.values())
+    bus.messages.sort(key=lambda m: m.bps, reverse=True)
+    return [bus]

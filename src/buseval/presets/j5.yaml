@@ -1,46 +1,41 @@
 # Horizon Robotics Journey 5 (J5) — SoC preset. Public-spec estimates; verify before use.
 masters:
-  - {name: CAN0, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
-  - {name: CAN1, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
-  - {name: CAN2, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
-  - {name: CSI0, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4, count: 4}}
-  - {name: CSI1, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}
-  - {name: CSI2, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}
-  - {name: CSI3, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4}}
-  - {name: CSI4, type: mipi_csi, verify: true, params: {width: 1280, height: 720, fps: 30, bpp: 12, lanes: 2}}
-  - {name: CSI5, type: mipi_csi, verify: true, params: {width: 1280, height: 720, fps: 30, bpp: 12, lanes: 2}}
-  - {name: USB0, type: usb, verify: true, params: {version: "3", util_pct: 0.2}}
-  - {name: ETH0, type: eth, verify: true, params: {link_gbps: 1, util_pct: 0.2, mtu: 1500}}
-  - {name: UFS0, type: flash, verify: true, params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1500, util_pct: 0.2, random_ratio: 0.2}}
+  - {name: CAN0, type: can, enabled: false, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN1, type: can, enabled: false, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CAN2, type: can, enabled: false, params: {bitrate_mbps: 0.5, load_pct: 0.4}}
+  - {name: CSI0, type: mipi_csi, params: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4, count: 4}}
+  - {name: CSI1, type: mipi_csi, params: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4}}
+  - {name: CSI2, type: mipi_csi, params: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4}}
+  - {name: CSI3, type: mipi_csi, params: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4}}
+  - {name: CSI4, type: mipi_csi, params: {width: 1280, height: 720, fps: 30, format: raw12, bpp: 12, lanes: 2}}
+  - {name: CSI5, type: mipi_csi, params: {width: 1280, height: 720, fps: 30, format: raw12, bpp: 12, lanes: 2}}
+  - {name: USB0, type: usb, params: {version: "3", util_pct: 0.2}}
+  - {name: ETH0, type: eth, params: {link_gbps: 1, util_pct: 0.2, mtu: 1500}}
+  - {name: UFS0, type: flash, params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1500, util_pct: 0.2, random_ratio: 0.2}}
 pipelines:
   - name: ISP0
     type: isp
     source: CSI1              # option: inherit input stream from a master (CSI/DSI). Null = use params.width/height/fps.
     mode: serial
-    verify: true
     stages:
-      - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
-      - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
-      - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
+      - {name: bayer, format: raw12, width: 1920, height: 1080, read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic, format: rgb888, width: 1920, height: 1080, read_factor: 1.5, write_factor: 1.0}
+      - {name: yuv_scale, format: yuv420, width: 1920, height: 1080, read_factor: 1.0, write_factor: 1.0}
   - name: VENC0
     type: venc
     source: ISP0
-    verify: true
-    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
+    params: {width: 1920, height: 1080, fps: 30, format: yuv422, bpp: 16, codec: h265}
   - name: NPU0
     type: npu
     source: [CSI0, ISP0]
     mode: parallel
-    verify: true
     params: {params_mbytes: 150, activation_mbytes: 80, inference_fps: 30, tops_peak: 128, tops_used: 90}
   - name: DISP0
     type: display
     source: ISP0
-    verify: true
   - name: DSI0
     type: mipi_dsi            # p2p: DSI carries Display's output to the physical MIPI DSI lanes
     source: DISP0
-    verify: true
     params: {lanes: 4}
 ddr_channels:
   - name: DDR0

@@ -1,62 +1,220 @@
-# TI TDA4VH (Jacinto 7) — SoC preset. All values are public-spec estimates; verify before use.
 masters:
-  - {name: CAN0, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
-  - {name: CAN1, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
-  - {name: CAN2, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
-  - {name: CAN3, type: can, enabled: false, verify: true, params: {bitrate_mbps: 0.5, load_pct: 0.3}}
-  - {name: CSI0, type: mipi_csi, verify: true, params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4, count: 4}}
-  - {name: CSI1, type: mipi_csi, verify: true, params: {width: 1280, height: 720, fps: 60, bpp: 12, lanes: 2}}
-  - {name: USB0, type: usb, verify: true, params: {version: "3", util_pct: 0.3}}
-  - {name: ETH0, type: eth, verify: true, params: {link_gbps: 1, util_pct: 0.3, mtu: 1500}}
-  - {name: OSPI0, type: spi, verify: true, params: {clock_mhz: 166, xfer_bytes: 512, xfer_hz: 50000}}
-  - {name: UFS0, type: flash, verify: true, params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1200, util_pct: 0.2, random_ratio: 0.2}}
+- name: CAN0
+  type: can
+  enabled: false
+  params:
+    bitrate_mbps: 0.5
+    load_pct: 0.3
+- name: CAN1
+  type: can
+  enabled: false
+  params:
+    bitrate_mbps: 0.5
+    load_pct: 0.3
+- name: CAN2
+  type: can
+  enabled: false
+  params:
+    bitrate_mbps: 0.5
+    load_pct: 0.3
+- name: CAN3
+  type: can
+  enabled: false
+  params:
+    bitrate_mbps: 0.5
+    load_pct: 0.3
+- name: CSI0
+  type: mipi_csi
+  enabled: true
+  params:
+    width: 1920
+    height: 1080
+    fps: 30
+    format: raw12
+    bpp: 12
+    lanes: 4
+    count: 4
+  ui_x: 29.0
+  ui_y: 205.0
+- name: CSI1
+  type: mipi_csi
+  enabled: true
+  params:
+    width: 1280
+    height: 720
+    fps: 60
+    format: raw12
+    bpp: 12
+    lanes: 2
+  ui_x: 36.0
+  ui_y: 42.0
+- name: USB0
+  type: usb
+  enabled: true
+  params:
+    version: '3'
+    util_pct: 0.3
+  ui_x: 40.0
+  ui_y: 420.0
+- name: ETH0
+  type: eth
+  enabled: true
+  params:
+    link_gbps: 1
+    util_pct: 0.3
+    mtu: 1500
+  ui_x: 328.0
+  ui_y: 278.0
+  ui_ddr_port: bottom:0.4905
+- name: OSPI0
+  type: spi
+  enabled: true
+  params:
+    clock_mhz: 166
+    xfer_bytes: 512
+    xfer_hz: 50000
+  ui_x: 643.0
+  ui_y: 423.0
+- name: UFS0
+  type: flash
+  enabled: true
+  params:
+    type: ufs
+    seq_read_mbps: 2000
+    seq_write_mbps: 1200
+    util_pct: 0.2
+    random_ratio: 0.2
+  ui_x: 40.0
+  ui_y: 539.0
 pipelines:
-  - name: ISP0
-    type: isp
-    source: CSI1              # option: inherit input stream from a master (CSI/DSI). Null = use params.width/height/fps.
-    mode: serial
-    verify: true
-    stages:
-      - {name: bayer,    read_factor: 1.0, write_factor: 1.0}
-      - {name: demosaic, read_factor: 1.5, write_factor: 2.0}
-      - {name: yuv_scale,read_factor: 2.0, write_factor: 1.0}
-  - name: VENC0
-    type: venc                # option: encode ISP output for recording. codec = h264|h265|av1
-    source: ISP0              # p2p: VENC reads ISP0's YUV output (upstream write_bw)
-    verify: true
-    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
-  - name: VDEC0
-    type: vdec                # playback decoder (independent; no source)
-    verify: true
-    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
-  - name: NPU0
-    type: npu
-    source: [CSI0, ISP0]      # multi-source: CSI0 raw-domain (4-cam) + ISP0 YUV output (p2p)
-    mode: parallel
-    verify: true
-    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8, tops_used: 6}
-  - name: GPU0
-    type: gpu
-    verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
-  - name: DISP0
-    type: display
-    source: ISP0              # p2p: Display reads ISP0's YUV output (EVS / viewfinder low-latency path)
-    verify: true
-  - name: DSI0
-    type: mipi_dsi            # p2p: DSI carries Display's output to the physical MIPI DSI lanes
-    source: DISP0             # inherits Display's read_bw as carried bandwidth; DDR=0 (Display already counts)
-    verify: true
-    params: {lanes: 4}
+- name: ISP0
+  type: isp
+  mode: serial
+  enabled: true
+  source: CSI1
+  params: {}
+  stages:
+  - name: bayer
+    read_factor: 1.0
+    write_factor: 1.0
+    format: raw12
+    width: 1280
+    height: 720
+  - name: demosaic
+    read_factor: 1.5
+    write_factor: 1.0
+    format: rgb888
+    width: 1280
+    height: 720
+  - name: yuv_scale
+    read_factor: 1.0
+    write_factor: 1.0
+    format: yuv420
+    width: 1280
+    height: 720
+  ui_x: 320.0
+  ui_y: 41.0
+- name: VENC0
+  type: venc
+  mode: serial
+  enabled: true
+  source: ISP0
+  params:
+    width: 1280
+    height: 720
+    fps: 60
+    format: yuv422
+    bpp: 16
+    codec: h265
+  stages: []
+  ui_x: 600.0
+  ui_y: 40.0
+- name: VDEC0
+  type: vdec
+  mode: serial
+  enabled: true
+  params:
+    width: 1920
+    height: 1080
+    fps: 30
+    format: yuv422
+    bpp: 16
+    codec: h265
+  stages: []
+  ui_x: 292.0
+  ui_y: 590.0
+  ui_ddr_port: top:0.4429
+- name: NPU0
+  type: npu
+  mode: parallel
+  enabled: true
+  source:
+  - CSI0
+  - ISP0
+  params:
+    params_mbytes: 80
+    activation_mbytes: 40
+    inference_fps: 30
+    tops_peak: 8
+    tops_used: 6
+  stages: []
+  ui_x: 600.0
+  ui_y: 150.0
+- name: GPU0
+  type: gpu
+  mode: serial
+  enabled: true
+  params:
+    width: 1920
+    height: 1080
+    fps: 60
+    format: rgba8888
+    bpp: 32
+    overdraw: 3
+  stages: []
+  ui_x: 562.0
+  ui_y: 584.0
+  ui_ddr_port: top:0.4571
+- name: DISP0
+  type: display
+  mode: serial
+  enabled: true
+  source: ISP0
+  params: {}
+  stages: []
+  ui_x: 600.0
+  ui_y: 260.0
+- name: DSI0
+  type: mipi_dsi
+  mode: serial
+  enabled: true
+  source: DISP0
+  params:
+    lanes: 4
+  stages: []
+  ui_x: 880.0
+  ui_y: 40.0
 ddr_channels:
-  - name: DDR0
-    controller_mt_s: 4266           # TDA4VH LPDDR4 controller supports up to 4266 MT/s
-    controller_width_bits: 32       # 32-bit per group
-    controller_groups: 4            # 4×32-bit = 128-bit effective
-    controller_type: LPDDR4
-    module_mt_s: 3200               # external LPDDR4-3200 module
-    module_width_bits: 32
-    module_groups: 4               # 4×32-bit = 128-bit effective
-    module_type: LPDDR4
-    efficiency: 0.7
-alert_thresholds: {yellow: 0.6, red: 0.8}
+- name: DDR0
+  controller_mt_s: 4266.0
+  controller_width_bits: 32
+  controller_groups: 4
+  controller_type: LPDDR4
+  module_mt_s: 3200.0
+  module_width_bits: 32
+  module_groups: 4
+  module_type: LPDDR4
+  efficiency: 0.7
+  ui_x: 345.0
+  ui_y: 411.0
+  ui_peer_port:
+    USB0: left:0.3636
+    UFS0: left:0.8750
+alert_thresholds:
+  yellow: 0.6
+  red: 0.8
+isp_vpacs:
+- name: ISP0
+  mpix_s: 600.0
+- name: ISP1
+  mpix_s: 600.0

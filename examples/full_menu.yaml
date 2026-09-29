@@ -1,67 +1,58 @@
 # Full-menu topology template.
 # Copy this file, change `enabled: true` for what your system has, and
-# fill in your own params. Items marked `verify: true` will be flagged
-# in the assumptions audit until you confirm them.
+# fill in your own params.
 
 masters:
   - name: CAN0
     type: can               # load-based mode (no DBC)
     enabled: false          # default off; enable via `--can-dbc CAN0=path.dbc` (CLI) or set enabled: true here for load mode
-    verify: true
     params: {bitrate_mbps: 0.5, load_pct: 0.3}
-    # hint: if you have a DBC, switch type to "can_dbc" and set params.dbc_path
+    # DBC file: keep type can and set params.dbc_path.
+    # CLI --can-dbc NAME=path.dbc still injects a can_dbc estimator for that master.
 
   - name: CAN1
     type: can
     enabled: false
-    verify: true
     params: {bitrate_mbps: 0.5, load_pct: 0.3}
 
   - name: SPI_FLASH0
     type: spi
     enabled: false
-    verify: true
     params: {clock_mhz: 50, xfer_bytes: 4096, xfer_hz: 10000}
     # hint: clock_mhz is the SPI bus clock; xfer_bytes×xfer_hz is the demand
 
   - name: CSI0
     type: mipi_csi
     enabled: false
-    verify: true
-    params: {width: 1920, height: 1080, fps: 30, bpp: 12, lanes: 4, count: 4}
+    params: {width: 1920, height: 1080, fps: 30, format: raw12, bpp: 12, lanes: 4, count: 4}
     # count = number of virtual-channel streams multiplexed on this port
     # (MIPI CSI-2 supports up to 4 VCs; use count=4 for worst-case max-load eval)
 
   - name: CSI1
     type: mipi_csi
     enabled: false
-    verify: true
-    params: {width: 1280, height: 720, fps: 60, bpp: 12, lanes: 2, count: 4}
+    params: {width: 1280, height: 720, fps: 60, format: raw12, bpp: 12, lanes: 2, count: 4}
 
   - name: DSI0
     type: mipi_dsi            # option: standalone (fills width/height/fps below) OR
                               #   pipeline with source: DISP0 (p2p, inherits Display output)
     enabled: false
-    verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 24, lanes: 4, count: 4}
+    params: {width: 1920, height: 1080, fps: 60, format: rgb888, bpp: 24, lanes: 4, count: 4}
 
   - name: USB0
     type: usb
     enabled: false
-    verify: true
     params: {version: "3", util_pct: 0.5}
     # version: "2" | "3" | "3.2"
 
   - name: ETH0
     type: eth
     enabled: false
-    verify: true
     params: {link_gbps: 1, util_pct: 0.4, mtu: 1500}
 
   - name: FLASH0
     type: flash
     enabled: false
-    verify: true
     params: {type: ufs, seq_read_mbps: 2000, seq_write_mbps: 1200, util_pct: 0.3, random_ratio: 0.2}
     # type: nand | emmc | ufs
 
@@ -76,15 +67,14 @@ pipelines:
     source: null                # e.g. CSI1 to wire ISP to CSI1's stream
     mode: serial            # serial: take max of stages; parallel: sum
     enabled: false
-    verify: true
     # When source is set, width/height/fps are optional (ignored). Shown here for
     # the no-source case. Customise stages freely — name/factor are arbitrary;
     # each stage's DDR traffic = frame_stream × factor.
     params: {width: 1920, height: 1080, fps: 30, in_format: raw12}
     stages:
-      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
-      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
-      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
+      - {name: bayer, format: raw12, width: 1920, height: 1080, read_factor: 1.0, write_factor: 1.0}
+      - {name: demosaic, format: rgb888, width: 1920, height: 1080, read_factor: 1.5, write_factor: 1.0}
+      - {name: yuv_scale, format: yuv420, width: 1920, height: 1080, read_factor: 1.0, write_factor: 1.0}
       # add your vendor-specific stages here, e.g.:
       # - {name: 我的NR,   read_factor: 1.8, write_factor: 1.2}
       # - {name: WDR,      read_factor: 2.5, write_factor: 1.5}
@@ -102,35 +92,25 @@ pipelines:
     source: null                # e.g. [CSI0, CSI1] for multi-source
     mode: parallel
     enabled: false
-    verify: true
     params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 50, tops_peak: 8, tops_used: 6}
 
   - name: GPU0
     type: gpu
     enabled: false
-    verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 32, overdraw: 3}
+    params: {width: 1920, height: 1080, fps: 60, format: rgba8888, bpp: 32, overdraw: 3}
 
   - name: DISP0
     type: display
     enabled: false
-    verify: true
-    params: {width: 1920, height: 1080, fps: 60, bpp: 32}
+    params: {width: 1920, height: 1080, fps: 60, format: rgba8888, bpp: 32}
 
 ddr_channels:
-  # Two ways to declare DDR bandwidth:
-  #
-  # 1. Physical params (recommended) — the engine computes:
-  #      controller_peak = controller_mt_s × controller_width_bits / 8 × 2  (×2 for DDR double data rate)
-  #      module_peak     = module_mt_s     × module_width_bits     / 8 × 2 × module_groups
-  #      effective_peak  = min(controller_peak, module_peak)   ← bottleneck
-  #      available       = effective_peak × efficiency
-  #    This correctly models the case where the external DRAM module is slower
-  #    (or faster) than the chip's DDR controller — the effective bandwidth is
-  #    limited by the slower of the two.
-  #
-  # 2. Legacy shorthand: theoretical_peak_mbps (assumes controller = module = this value).
-  #    If physical params are present, theoretical_peak_mbps is ignored.
+  # Effective peak is the slower of the chip controller and the onboard DRAM.
+  # MT/s already includes DDR, so do not multiply by 2.
+  #   controller_peak = controller_mt_s × controller_width_bits / 8 × controller_groups
+  #   module_peak     = module_mt_s × module_width_bits / 8 × module_groups
+  #   effective_peak  = min(controller_peak, module_peak)
+  #   available       = effective_peak × efficiency
 
   - name: DDR0
     # chip DDR controller (from SoC datasheet)
@@ -145,7 +125,6 @@ ddr_channels:
     module_type: LPDDR4
     # common
     efficiency: 0.7                 # usable fraction after refresh / row miss / etc.
-    read_write_ratio: null          # null = symmetric (0.5/0.5)
 
 alert_thresholds:
   yellow: 0.6

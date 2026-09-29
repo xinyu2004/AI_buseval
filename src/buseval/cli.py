@@ -10,7 +10,6 @@ from rich.console import Console
 from . import __version__
 from .loader import load_topology
 from .engine.predictor import predict
-from .engine.margin import evaluate_margin
 from .lint import lint
 from .report.terminal import render_terminal, render_health_terminal
 from .report.structured import build_structured, dump_yaml, dump_json
@@ -87,7 +86,6 @@ def _make_dbc_master(name: str, dbc_path: str):
         type="can_dbc",
         enabled=True,
         params={"dbc_path": dbc_path, "direction": "both"},
-        verify=False,  # explicitly injected by user, not a default
     )
 
 
@@ -108,12 +106,22 @@ def _parse_can_dbc_arg(values: list[str]) -> list[tuple[str, str]]:
     return out
 
 
-def _write_output(report_text: str, out_path: str | None, fmt: str, report_dict=None):
-    if out_path:
-        Path(out_path).write_text(report_text, encoding="utf-8")
-        return
-    # default to stdout
-    print(report_text)
+def emit_cli_report(report: dict, *, fmt: str, output: str | None, render) -> None:
+    """Print one report and optionally write the same structured body to a file.
+
+    Table mode still writes YAML/JSON when --output is set. The three predict
+    modes (DDR, CAN, GMSL) share this path.
+    """
+    if fmt == "json":
+        print(dump_json(report))
+    elif fmt == "yaml":
+        print(dump_yaml(report))
+    else:
+        render()
+    if output:
+        ext = Path(output).suffix.lower()
+        content = dump_json(report) if ext == ".json" else dump_yaml(report)
+        Path(output).write_text(content, encoding="utf-8")
 
 
 def cmd_predict(args) -> int:
@@ -135,18 +143,13 @@ def cmd_predict(args) -> int:
         except Exception as e:
             print(f"Failed to parse DBC: {e}", file=sys.stderr)
             return 2
-        if args.format == "json":
-            print(dump_json(report.to_dict()))
-        elif args.format == "yaml":
-            print(dump_yaml(report.to_dict()))
-        else:
-            render_health_terminal(report, console=console, use_color=not args.no_color)
-        if args.output:
-            ext = Path(args.output).suffix.lower()
-            content = (
-                dump_json(report.to_dict()) if ext == ".json" else dump_yaml(report.to_dict())
-            )
-            Path(args.output).write_text(content, encoding="utf-8")
+        body = report.to_dict()
+        emit_cli_report(
+            body,
+            fmt=args.format,
+            output=args.output,
+            render=lambda: render_health_terminal(report, console=console, use_color=not args.no_color),
+        )
         return 0
 
     if args.soc:
@@ -164,22 +167,16 @@ def cmd_predict(args) -> int:
         print(f"Prediction error: {e}", file=sys.stderr)
         return 2
 
-    if args.format == "json":
-        print(dump_json(build_structured(prediction)))
-    elif args.format == "yaml":
-        print(dump_yaml(build_structured(prediction)))
-    else:
-        render_terminal(prediction, console=console, use_color=not args.no_color)
-
-    if args.output:
-        ext = Path(args.output).suffix.lower()
-        rep = build_structured(prediction)
-        content = dump_json(rep) if ext == ".json" else dump_yaml(rep)
-        Path(args.output).write_text(content, encoding="utf-8")
+    rep = build_structured(prediction)
+    emit_cli_report(
+        rep,
+        fmt=args.format,
+        output=args.output,
+        render=lambda: render_terminal(prediction, console=console, use_color=not args.no_color),
+    )
 
     # exit code: non-zero on CRITICAL for CI integration
-    margins = evaluate_margin(prediction)
-    if any(m.verdict == "CRITICAL" for m in margins):
+    if any(m.verdict == "CRITICAL" for m in prediction.margins):
         return 3
     return 0
 
@@ -215,9 +212,11 @@ def cmd_gmsl(args, console: Console) -> int:
             )
             return 2
         overrides = {}
-        for k in ("blanking", "encoding_factor", "overhead_factor"):
+        for k in ("blanking", "heartbeat", "encoding", "fec", "pixel_crc", "phy", "lanes"):
             if k in params:
                 overrides[k] = params.pop(k)
+        params.pop("encoding_factor", None)
+        params.pop("overhead_factor", None)
         name = params.pop("name", "LINK1")
         links_spec = [{**params, "name": name}]
         report = build_report_from_links(links_spec, overrides)
@@ -238,19 +237,12 @@ def cmd_gmsl(args, console: Console) -> int:
             return 2
         report = build_report_from_links(links_spec, overrides)
 
-    # output
-    if args.format == "json":
-        print(dump_json(build_gmsl_structured(report)))
-    elif args.format == "yaml":
-        print(dump_yaml(build_gmsl_structured(report)))
-    else:
-        render_gmsl_terminal(report, console=console, use_color=not args.no_color)
-
-    if args.output:
-        ext = Path(args.output).suffix.lower()
-        content = dump_json(build_gmsl_structured(report)) if ext == ".json" else dump_yaml(build_gmsl_structured(report))
-        Path(args.output).write_text(content, encoding="utf-8")
-
+    emit_cli_report(
+        build_gmsl_structured(report),
+        fmt=args.format,
+        output=args.output,
+        render=lambda: render_gmsl_terminal(report, console=console, use_color=not args.no_color),
+    )
     return 0
 
 
@@ -267,6 +259,69 @@ def cmd_lint(args) -> int:
             has_error = True
         print(f"[{level}] {iss.rule}: {iss.message}")
     return 1 if has_error else 0
+
+
+def cmd_compare(args) -> int:
+    from .engine.compare import compare_measurement, load_measurement
+    from .session import evaluate
+
+    topology = load_topology(args.topology)
+    try:
+        prediction = evaluate(topology)
+        rows = compare_measurement(prediction, load_measurement(args.measurement))
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"{'name':<16} {'pred R/W':<22} {'meas R/W':<22} {'verdict':<10} note")
+    for row in rows:
+        pred = ""
+        meas = ""
+        if row.predicted_read is not None:
+            pred = f"{row.predicted_read:.1f}/{row.predicted_write:.1f}"
+        if row.measured_read is not None:
+            meas = f"{row.measured_read:.1f}/{row.measured_write:.1f}"
+        print(f"{row.name:<16} {pred:<22} {meas:<22} {row.verdict:<10} {row.note}")
+    if any(row.verdict == "FAIL" for row in rows):
+        return 3
+    return 0
+
+
+def cmd_collect(args) -> int:
+    from .collect.runner import probe_platform, run_collect
+
+    try:
+        if args.probe:
+            print(probe_platform(args.platform))
+            return 0
+        if not args.output:
+            print("collect requires -o meas.json", file=sys.stderr)
+            return 2
+        extra = []
+        if args.pattern:
+            extra += ["--pattern", args.pattern]
+        if args.bytes is not None:
+            extra += ["--bytes", str(args.bytes)]
+        if args.threads is not None:
+            extra += ["--threads", str(args.threads)]
+        if args.duration is not None:
+            extra += ["--duration", str(args.duration)]
+        if args.name:
+            extra += ["--name", args.name]
+        run_collect(args.platform, args.output, extra)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(args.output)
+    return 0
+
+
+def cmd_ui(_args) -> int:
+    try:
+        from .gui.app import main as gui_main
+    except ImportError as exc:
+        print(f"GUI needs PySide6 (pip install -e '.[gui]'): {exc}", file=sys.stderr)
+        return 2
+    return gui_main()
 
 
 def cmd_list(args) -> int:
@@ -327,10 +382,33 @@ def build_parser() -> argparse.ArgumentParser:
     lp2.add_argument("what", choices=["estimators", "presets"])
     lp2.set_defaults(func=cmd_list)
 
+    cp = sub.add_parser("compare", help="Compare a topology YAML prediction with meas.json.")
+    cp.add_argument("-t", "--topology", required=True)
+    cp.add_argument("-m", "--measurement", required=True)
+    cp.set_defaults(func=cmd_compare)
+
+    col = sub.add_parser("collect", help="Run a platform collector and write meas.json.")
+    col.add_argument("--platform", default="arm_pc")
+    col.add_argument("-o", "--output")
+    col.add_argument("--probe", action="store_true")
+    col.add_argument("--pattern", choices=["read", "write", "copy"])
+    col.add_argument("--bytes", type=int)
+    col.add_argument("--threads", type=int)
+    col.add_argument("--duration", type=float)
+    col.add_argument("--name")
+    col.set_defaults(func=cmd_collect)
+
+    gui = sub.add_parser("gui", help="Open the topology canvas.")
+    gui.set_defaults(func=cmd_ui)
+
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "ui":
+        argv = ["gui", *argv[1:]]
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
