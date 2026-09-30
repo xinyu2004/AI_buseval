@@ -54,6 +54,12 @@ def _verdict(errors: list[float | None], ok: float, warn: float) -> str:
     return "FAIL"
 
 
+def _measured_mbps(raw: dict, key: str) -> float | None:
+    if key not in raw or raw[key] is None:
+        return None
+    return float(raw[key])
+
+
 def compare_measurement(prediction: PredictionResult, measurement: dict) -> list[CompareRow]:
     """Align measurement items to prediction items or DDR channels by name.
 
@@ -71,8 +77,8 @@ def compare_measurement(prediction: PredictionResult, measurement: dict) -> list
     for raw in measured_items:
         name = str(raw.get("name", ""))
         seen.add(name)
-        meas_r = float(raw.get("read_bw_mbps", 0) or 0)
-        meas_w = float(raw.get("write_bw_mbps", 0) or 0)
+        meas_r = _measured_mbps(raw, "read_bw_mbps")
+        meas_w = _measured_mbps(raw, "write_bw_mbps")
         note = ""
         if name in by_item:
             pred_r = by_item[name].read_bw_mbps

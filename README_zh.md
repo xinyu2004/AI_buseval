@@ -2,30 +2,21 @@
 
 # buseval — SoC 带宽评估工具
 
-在板子还能改的时候把 DDR 定下来。芯片上有了实测，再把估算拿回去对。
+立项按功能选定 SoC 与 DDR。工程样回板后，用整机读写核对加总预估与实测的偏差。
 
 ## 为什么需要
 
-位宽、颗粒速率和用几颗，一落板就改不动。带宽不够，先丢帧、再改板。带宽留得太多，每出一台都在为用不上的内存付钱。buseval 用来在设计还开着的时候做这个选择，也用来在芯片能够测量之后再核一次。
+立项要先把功能确定下来。功能定了，才有依据选择 SoC，以及这块板要配的 DDR 容量。这一步是初步选型。
 
-## 总目标
+初步选型之后，同一套功能反复放进工具里做模拟预测。换 SoC 小型号，换 DDR 供应商，比较每一组的性能和价格，把料收到性价比最好的那一档。
 
-1. **定板之前**：把场景写进来，摄像头、DBC、码率、TOPS。引擎把各模块的读写加总，对着这块板实际给得出的 DDR，标出谁在吃带宽。
-2. **上板之后**：从芯片上把同一份带宽读回来。
-3. **有了实测**：两边摆在一起，看模型偏在哪里，把内存停在够用的那一档。
+采购按选定的小型号和供应商下料号，写入 BOM。财务按 SoC 和 DDR 两项计入单台成本。小型号不同，芯片成本不同；供应商不同，同容量的单价不同。模拟就是在这些组合里取性价比。
 
-## Phase 1（已冻结）
-
-前期预测，命令行和画布都在里面。采集和对比留在路线图。
-
-- 14 个内置估算器
-- 入口：SoC DDR 拓扑（空白画布、常用芯片或私有芯片）、CAN 健康报告、GMSL 链路
-- 7 颗常用芯片、样例 DBC、完整菜单模板
-- 报告：贡献者、读写需求、R-util / W-util / 占用率，三条百分比同一套绿黄红。裁决看占用率。没有风险记录时不打印 assumptions
-- 画布：拖入模块、连 `source`、进程内评估。DDR 卡片用绿、黄、红写出占用率
-- `lint` 查漏项和矛盾
+工程样回板核对的是整机总量。总量相近，仍可能是一个模块估高、另一个估低。CAN 负载和 GMSL 链路是立项后的器件选型，不参与这次 SoC 与 DDR 的选择，可用硬件采集验证。
 
 ## 快速开始
+
+第一步是立项：按功能选 SoC 和 DDR 容量，再反复模拟小型号和供应商。CAN 和 GMSL 是立项后的选型。
 
 ```bash
 pip install -e .
@@ -39,18 +30,15 @@ buseval predict --soc tda4vh
 ```bash
 # 2. CAN-FD 健康报告（2 Mbps）
 buseval predict --dbc examples/sample.dbc --can-bitrate 2000
-# 2b. 多 CAN 通路：把不同 DBC 挂到指定 CAN 控制器
-buseval predict --soc tda4vh \
-    --can-dbc CAN0=examples/sample.dbc \
-    --can-dbc CAN2=examples/sample_heavy.dbc
+# 多路：把不同 DBC 挂到指定 CAN 控制器
+buseval predict --soc tda4vh --can-dbc CAN0=examples/sample.dbc --can-dbc CAN2=examples/sample_heavy.dbc
 ```
 
 ![CAN 健康报告](./gallery/CAN.png)
 
 ```bash
-# 3. GMSL 链路带宽（独立工具，单路）
+# 3. GMSL 链路带宽
 buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
-# 3b. GMSL 多路（YAML）
 buseval predict --GMSL examples/gmsl_links.yaml
 ```
 
@@ -59,23 +47,17 @@ buseval predict --GMSL examples/gmsl_links.yaml
 ```bash
 # 4. 自配 YAML
 cp examples/full_menu.yaml my.yaml
-buseval lint my.yaml
 buseval predict -t my.yaml
 ```
 
 ## 图形界面
-
-CLI 和 GUI 互不调用，共用同一份拓扑 YAML。`buseval predict -t` 仍是第一阶段的命令。
 
 ```bash
 pip install -e '.[gui]'
 buseval gui
 ```
 
-启动时先选要评估的类型。
-
-- **SoC DDR 拓扑**：空白画布、常用芯片，或一份私有芯片文件。画布左侧是模块库。拖入模块，连线写入 `source`，双击节点改参数，双击 DDR 卡片改通道。下方 DDR 条只显示状态。菜单「评估」在界面进程里计算。模块按读写占比变深，DDR 卡片用绿、黄、红写出占用率。保存后的 YAML 仍可用 `buseval predict -t` 再跑。
-- **CAN 健康报告**和 **GMSL 链路**从同一个选择窗口打开，也在文件菜单里。它们不进这张拓扑图。
+启动时先选类型。SoC DDR 是画布：拖入模块，连线，双击改参数，评估后 DDR 按占用率显示绿、黄、红。CAN 和 GMSL 是另外的页面。
 
 GMSL 是一页：一根同轴上最多四路摄像头、链路公式，以及等级。上面的命令行面板是同一套计算。
 
@@ -83,9 +65,11 @@ GMSL 是一页：一根同轴上最多四路摄像头、链路公式，以及等
 
 ## 实测
 
-在 PC 上，`buseval collect` 打出 DDR 读写速率。加上 `-o` 才另写 `meas.json`。这条命令没有平台参数。计数器来自对 `perf list` 和 `/sys/bus/event_source/devices` 的扫描：同时有读突发和写突发的 PMU 才留下。已有合计计数时只用那一对；没有合计时才把同一设备上的通道相加。不用 CPU cache miss。总数包含 DMA，拆不开某一路摄像头或网卡。加载 `amd_uncore` 前会先说明风险；统计是全机的，所以会要管理员密码。计数器不存在就退出，不编一个带宽数字。
+`buseval collect` 读本机内存控制器的读写次数，打出整机 DDR 带宽。`-o` 另写 `meas.json`。没有平台参数。计数器来自 `perf list` 和 `/sys/bus/event_source/devices`：同时有读突发和写突发的 PMU 才留下。已有合计计数时只用那一对；没有合计时才把通道相加。不用 CPU cache miss。总数包含 DMA，拆不开某一路摄像头或网卡。
 
-`src/buseval/embedded/` 是拷到板子上的那一包。`pc_pmu.sh` 打出同一套 count window、DDR read、DDR write，时间保持 perf 的全部小数。`-o` 保存这段文字且不带颜色。它不调用 buseval。`buseval collect --from` 读的就是这段文字。CAN 和 GMSL 不在这条命令里。SoC DDR（先 TDA4VH）在该芯片的 DDR 计数器已经是 `perf` 事件或 sysfs 文件时直接读。两者都没有时才写 C。
+一次计数代表多少字节，取自这块机器：事件的 scale、perf 指标表达式，或这次 `perf stat` 已经打出的 MB/s。取不到就不写 `count size`，也不编一个 MB/s。这次命令要输入管理员密码时，先给出风险说明；sudo 票据还在、不会问密码时，说明和密码都不出现。AMD 上若计数器还没注册，加载 `amd_uncore` 前同样先说明。计数器不存在就退出。
+
+`src/buseval/embedded/ddr_pmu.sh` 拷到板子上跑，不调用 buseval。它打出同一套 count window、count size、DDR read、DDR write，时间保持 perf 的全部小数。`-o` 保存不带颜色的这段文字。`buseval collect --from` 读这段文字，字节数用其中的 count size。
 
 ```bash
 buseval collect
@@ -93,82 +77,26 @@ buseval collect -o meas.json
 buseval compare -t my.yaml -m meas.json
 ```
 
-GUI 用「实测 → 导入实测」读同一份文件。对比在各自进程里完成，不把 CLI 的输出交给 GUI。
+![DDR 采集](./gallery/collect.png)
+
+对比把实测的整机读写对着预测加总。GUI 用「实测 → 导入实测」读同一份 `meas.json`。
 
 ## 路线图
 
-- **Phase 1（已冻结）**：命令行和界面都覆盖 SoC DDR、CAN 健康报告、GMSL 链路。DDR 占用率显示绿、黄、红
-- **阶段 A**：PC 上 `buseval collect` 调 `perf`。CAN 和 GMSL 不在这条命令里
-- **阶段 B**：SoC DDR 计数器（先 TDA4VH），先用 `perf` 或 sysfs。两者都没有才写 C
-- **阶段 C**：板端 CAN / GMSL，需要对应硬件，仍写 `meas.json`
-- 系数自校准仍在后面，不在本轮
+- **阶段 A（已有）**：本机 `buseval collect` 读整机 DDR。
+- **阶段 B**：把 `ddr_pmu.sh` 拷到 SoC，仍是整机总量。还没有在板上跑过。内核没有这组计数时才考虑写 C。
 
 ## 支持的估算器
 
-CAN(DBC) / CAN(load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH(NAND/eMMC/UFS) / ISP / NPU / GPU / Display / VENC(H.264/H.265/AV1) / VDEC
+CAN / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH / ISP / NPU / GPU / Display / VENC / VDEC
 
-MIPI CSI / DSI 支持 `count` 参数，建模单端口多路复用（MIPI 虚拟通道 VC0-3，或解串器汇聚）。
-`count: 4` 表示一个 CSI 口接 4 路摄像头，做最坏情况带宽评估；lane 容量按聚合带宽检查。
-默认 1（向后兼容）。
-
-## Pipeline 连线（`source`）与 ISP stages
-
-pipeline（ISP / NPU / VENC / VDEC / Display）可声明可选的 `source` 字段，指向某个
-master（如 `CSI1`）**或另一个 pipeline**（如 `ISP0`）的输出。这样数据流显式可见
-（pipeline→pipeline 链式支持，按拓扑排序计算；环依赖会报错）。
-
-- **master 源**（如 `CSI0`）：pipeline 继承 master 的图像尺寸（width/height/fps/bpp/count），
-  自己算帧流。
-- **pipeline 源**（如 `ISP0`）：pipeline 拿到上游 pipeline 的**输出带宽**（write_bw）
-  作输入——用于 `ISP0→NPU0`（NPU 读 ISP 的 YUV 输出）、`ISP0→VENC0`（编码 ISP 输出）、
-  `ISP0→DISP0`（低延迟取景器通路）。
-- 直接从 DDR 读的 IP（无源）保持 `source: null`，把 width/height/fps/bpp 直接写在
-  `params` 里。
-
-```yaml
-pipelines:
-  - name: ISP0
-    type: isp
-    source: CSI1              # master → pipeline（继承 CSI1 的尺寸）
-    mode: serial              # serial = 各级取 max；parallel = 各级求和
-    stages:                   # 完全可自定义 — 名称和系数任意
-      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
-      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
-      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
-      # 厂商专有级 — 任意名称、任意系数：
-      - {name: custom_NR,  read_factor: 1.8, write_factor: 1.2}
-      - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
-    # 每级 DDR 流量 = frame_stream × factor
-  - name: VENC0
-    type: venc                # 编码 ISP 输出录像；codec = h264|h265|av1
-    source: ISP0              # p2p：VENC 读 ISP0 的 YUV 输出
-    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
-  - name: VDEC0
-    type: vdec                # 回放解码器（独立，无 source）
-    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
-  - name: NPU0
-    type: npu
-    source: [CSI0, ISP0]      # 多源：CSI0 raw 域（4 路）+ ISP0 YUV 输出（p2p）
-                              #   各源用原生 fps（不同步、不 cap），
-                              #   input 是各源 MB/s 之和（不是 fps 之和），
-                              #   weight + activation 只算一次（模型共享）
-    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8}
-  - name: DISP0
-    type: display
-    source: ISP0              # p2p：Display 读 ISP0 的 YUV（低延迟通路）
-```
-
-所有 SoC 预设默认带一条连线（CSI1→ISP0→{NPU0, VENC0, DISP0}；NPU0 同时也 source CSI0）
-作为起点，按你的板子在 YAML 里改即可。
-
-### 编码器压缩比（VENC / VDEC）
-
-`codec` 选默认压缩比（可在 `_coefficients.yaml` 配置）：h264=30、h265=50、av1=70。
-单条覆盖用 `params.compression_ratio: 40`。
+一个 CSI 或 DSI 口上的多路摄像头用 `count` 按路数相加。连线、ISP 级数和压缩比见 [design.md](design.md)。
 
 ## 常用芯片
 
 TI TDA4VH / NVIDIA Orin NX / 地平线 J5 / 高通 SA8155 / 瑞芯微 RK3588 / 全志 T527 / NXP S32G
+
+预设里的 DDR 速率和位宽按公开规格填写。
 
 ## 文档
 

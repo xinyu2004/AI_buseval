@@ -10,7 +10,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .host import amd_cpu, ddr_events, device_names, machine_arch, perf_list_text, require_perf
+from .host import amd_cpu, ddr_events, device_names, event_bytes, machine_arch, perf_list_text, require_perf
 from .perf_text import measurement_from_perf, parse_collect_text, parse_perf_stat
 from .pmu import ddr_role
 from .privilege import run_privileged
@@ -54,7 +54,13 @@ def probe_text(listing: str | None = None, devices: list[str] | None = None) -> 
         devices = device_names()
     pair = ddr_events(listing if listing is not None else perf_list_text())
     events = list(pair) if pair else []
-    lines = [f"arch={machine_arch()}", "devices=" + " ".join(devices), "events=" + ",".join(events)]
+    size = event_bytes(tuple(events)) if events else None
+    lines = [
+        f"arch={machine_arch()}",
+        "devices=" + " ".join(devices),
+        "events=" + ",".join(events),
+        "bytes=" if size is None else f"bytes={size}",
+    ]
     if not events:
         raise RuntimeError("perf list has no memory-controller read and write events\n" + "\n".join(lines))
     return "\n".join(lines)
@@ -64,22 +70,14 @@ def _load_amd_uncore() -> bool:
     """Load the AMD uncore driver when this CPU is AMD and the PMU is missing."""
     if not amd_cpu() or shutil.which("modprobe") is None:
         return False
-    proc = run_privileged(
-        ["modprobe", "amd_uncore"],
-        notice=_MODPROBE_RISK,
-        consent_name="modprobe-amd-uncore",
-    )
+    proc = run_privileged(["modprobe", "amd_uncore"], notice=_MODPROBE_RISK)
     return proc.returncode == 0
 
 
 def _perf_stat_text(events: tuple[str, ...], duration: float) -> str:
     """System-wide counts. Stats come back on stderr so root does not open /tmp."""
     cmd = ["perf", "stat", "-a", "-e", ",".join(events), "--", "sleep", str(duration)]
-    proc = run_privileged(
-        cmd,
-        notice=_COUNT_RISK.format(duration=duration),
-        consent_name="perf-stat",
-    )
+    proc = run_privileged(cmd, notice=_COUNT_RISK.format(duration=duration))
     text = proc.stderr or ""
     if proc.returncode != 0:
         detail = (text + (proc.stdout or "")).strip()
@@ -104,6 +102,9 @@ def collect_machine(
     if pair is None:
         raise RuntimeError("perf list has no memory-controller read and write events")
     parsed = parse_perf_stat(_perf_stat_text(pair, duration))
+    looked_up = event_bytes(pair)
+    if looked_up is not None:
+        parsed["count_bytes"] = looked_up
     body = measurement_from_perf(parsed, item_name=_item_name(name), source="ddr")
     raw = (body.get("items") or [{}])[0].get("raw") or {}
     if not any(ddr_role(event) for event in raw):

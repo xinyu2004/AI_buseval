@@ -1,31 +1,15 @@
-"""Remember that the user accepted one administrator action.
+"""Ask before an administrator command that will require a password.
 
-The file is a flag under `~/.config/buseval`. It does not store a password.
+Nothing is stored. Each time a password will be asked, the caller shows
+the notice again. A live sudo ticket never reaches this function.
 """
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 
-def consent_dir() -> Path:
-    return Path.home() / ".config" / "buseval"
-
-
-def accepted(name: str) -> bool:
-    return (consent_dir() / name).is_file()
-
-
-def remember(name: str) -> None:
-    directory = consent_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / name).write_text("accepted\n", encoding="utf-8")
-
-
-def confirm(text: str, name: str) -> bool:
-    """Print `text` and ask once. A later call with the same `name` stays quiet."""
-    if accepted(name):
-        return True
+def confirm(text: str) -> bool:
+    """Print `text` and ask. Decline, EOF, or a non-interactive stdin is no."""
     print(text, file=sys.stderr)
     if not sys.stdin.isatty():
         return False
@@ -33,7 +17,4 @@ def confirm(text: str, name: str) -> bool:
         answer = input("Continue and enter the administrator password? [y/N] ")
     except EOFError:
         return False
-    if answer.strip().lower() not in {"y", "yes"}:
-        return False
-    remember(name)
-    return True
+    return answer.strip().lower() in {"y", "yes"}

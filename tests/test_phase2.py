@@ -151,14 +151,19 @@ def test_share_color_darkens_the_largest_item():
 def test_perf_text_becomes_ddr_measurement():
     parsed = parse_perf_stat(PERF_TEXT)
     body = measurement_from_perf(parsed)
-    elapsed = 1.003544283
     assert body["kind"] == "ddr_bw"
     assert body["source"] == "ddr"
     assert body["items"][0]["name"] == "DDR"
-    assert body["items"][0]["read_bw_mbps"] == pytest.approx(5_602_648 * 64 / elapsed / 1e6)
-    assert body["items"][0]["write_bw_mbps"] == pytest.approx(1_024_027 * 64 / elapsed / 1e6)
-    assert panel_lines(body)[2] == "DDR read  5602648 times"
-    assert panel_lines(body)[5] == "DDR write  1024027 times"
+    assert body["count_bytes"] is None
+    assert body["items"][0]["read_bw_mbps"] is None
+    assert body["items"][0]["write_bw_mbps"] is None
+    assert panel_lines(body) == [
+        "count window  [magenta]1.003544283 s[/magenta]",
+        "",
+        "DDR read  5602648 times",
+        "",
+        "DDR write  1024027 times",
+    ]
 
 
 def test_ddr_events_come_from_the_perf_list():
@@ -211,31 +216,58 @@ def test_umc_cas_counts_are_memory_controller_bytes():
 """
     body = measurement_from_perf(parse_perf_stat(text), source="umc")
     elapsed = 1.003544283
+    assert body["count_bytes"] == 64
     assert body["items"][0]["read_bw_mbps"] == pytest.approx(5_602_648 * 64 / elapsed / 1e6)
     assert body["items"][0]["write_bw_mbps"] == pytest.approx(1_024_027 * 64 / elapsed / 1e6)
     assert "duration_time" not in body["items"][0]["raw"]
     shown = panel_lines(body)
     assert shown == [
         "count window  [magenta]1.003544283 s[/magenta]",
+        "count size  [bright_blue]64 B[/bright_blue]",
         "",
         "DDR read  5602648 times",
-        f"5602648 × 64 B / [magenta]1.003544283 s[/magenta] = {body['items'][0]['read_bw_mbps']:.4f} MB/s",
+        f"5602648 × [bright_blue]64 B[/bright_blue] / [magenta]1.003544283 s[/magenta] = {body['items'][0]['read_bw_mbps']:.4f} MB/s",
         "",
         "DDR write  1024027 times",
-        f"1024027 × 64 B / [magenta]1.003544283 s[/magenta] = {body['items'][0]['write_bw_mbps']:.4f} MB/s",
+        f"1024027 × [bright_blue]64 B[/bright_blue] / [magenta]1.003544283 s[/magenta] = {body['items'][0]['write_bw_mbps']:.4f} MB/s",
     ]
 
 
-def test_count_notice_is_asked_once(tmp_path, monkeypatch, capsys):
+def test_count_bytes_follow_the_machines_metric_or_scale(tmp_path):
+    from buseval.collect.host import event_bytes
+    from buseval.collect.perf_text import bytes_from_metric_text
+
+    metric = "\n".join([
+        "[umc_cas_cmd.rd * 64 / 1e6 / duration_time]",
+        "[umc_cas_cmd.wr * 64 / 1e6 / duration_time]",
+        "[k3_ddr.read * 32 / duration_time]",
+        "[k3_ddr.write * 32 / duration_time]",
+    ])
+    assert bytes_from_metric_text(metric, ["umc_cas_cmd.rd", "umc_cas_cmd.wr"]) == 64
+    assert bytes_from_metric_text(metric, ["read", "write"]) == 32
+    assert bytes_from_metric_text("[a.read * 32 / duration_time]\n[a.write * 64 / duration_time]\n", ["read", "write"]) is None
+    specs = ("amd_umc/umc_cas_cmd.rd/", "amd_umc/umc_cas_cmd.wr/")
+    assert event_bytes(specs, sysfs=tmp_path, metric_text=metric) == 64
+    events = tmp_path / "amd_umc_0" / "events"
+    events.mkdir(parents=True)
+    (events / "umc_cas_cmd.rd.scale").write_text("32\n", encoding="utf-8")
+    (events / "umc_cas_cmd.wr.scale").write_text("32\n", encoding="utf-8")
+    assert event_bytes(specs, sysfs=tmp_path, metric_text=metric) == 32
+    report = "count window  1.0 s\ncount size  32 B\n\nDDR read  1000 times\n\nDDR write  500 times\n"
+    body = measurement_from_perf(parse_collect_text(report))
+    assert body["count_bytes"] == 32
+    assert body["items"][0]["read_bw_mbps"] == pytest.approx(1000 * 32 / 1e6)
+
+
+def test_count_notice_is_asked_every_time_a_password_will_be_required(monkeypatch, capsys):
     from buseval.collect import consent
 
-    monkeypatch.setattr(consent, "consent_dir", lambda: tmp_path)
     monkeypatch.setattr(consent.sys.stdin, "isatty", lambda: True)
-    answers = iter(["y"])
+    answers = iter(["y", "y"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
-    assert confirm("notice", "perf-stat") is True
-    assert confirm("notice", "perf-stat") is True
-    assert capsys.readouterr().err.count("notice") == 1
+    assert confirm("notice") is True
+    assert confirm("notice") is True
+    assert capsys.readouterr().err.count("notice") == 2
 
 
 def test_notice_appears_only_when_sudo_will_ask_for_a_password(tmp_path, monkeypatch):
@@ -247,8 +279,8 @@ def test_notice_appears_only_when_sudo_will_ask_for_a_password(tmp_path, monkeyp
     monkeypatch.setattr(privilege.shutil, "which", lambda _name: "/usr/bin/sudo")
     asked: list[str] = []
 
-    def fake_confirm(text: str, name: str) -> bool:
-        asked.append(name)
+    def fake_confirm(text: str) -> bool:
+        asked.append(text)
         return True
 
     monkeypatch.setattr(privilege, "confirm", fake_confirm)
@@ -258,12 +290,12 @@ def test_notice_appears_only_when_sudo_will_ask_for_a_password(tmp_path, monkeyp
         lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, "", ""),
     )
     monkeypatch.setattr(privilege, "password_required", lambda: False)
-    privilege.run_privileged(["perf", "stat"], notice="notice", consent_name="perf-stat")
+    privilege.run_privileged(["perf", "stat"], notice="notice")
     assert asked == []
 
     monkeypatch.setattr(privilege, "password_required", lambda: True)
-    privilege.run_privileged(["perf", "stat"], notice="notice", consent_name="perf-stat")
-    assert asked == ["perf-stat"]
+    privilege.run_privileged(["perf", "stat"], notice="notice")
+    assert asked == ["notice"]
 
 
 def test_tab_completion_lists_commands_and_collect_flags(tmp_path):
@@ -347,6 +379,7 @@ def test_report_text_keeps_the_perf_time(tmp_path, capsys):
     write_bw = round(1_024_027 * 64 / float(elapsed) / 1e6, 4)
     report = "\n".join([
         f"count window  {elapsed} s",
+        "count size  64 B",
         "",
         "DDR read  5602648 times",
         f"5602648 × 64 B / {elapsed} s = {read_bw:.4f} MB/s",
@@ -366,7 +399,7 @@ def test_report_text_keeps_the_perf_time(tmp_path, capsys):
     assert f"count window  {elapsed} s" in capsys.readouterr().out
 
 
-def test_pc_pmu_prints_the_same_lines(tmp_path):
+def test_ddr_pmu_prints_the_same_lines(tmp_path):
     import os
     import subprocess
 
@@ -378,6 +411,10 @@ def test_pc_pmu_prints_the_same_lines(tmp_path):
     perf.write_text(
         "#!/bin/sh\n"
         "if [ \"$1\" = \"list\" ]; then\n"
+        "  if [ \"${2:-}\" = \"--details\" ]; then\n"
+        "    printf '%s\\n' '[umc_cas_cmd.rd * 64 / 1e6 / duration_time]' '[umc_cas_cmd.wr * 64 / 1e6 / duration_time]'\n"
+        "    exit 0\n"
+        "  fi\n"
         "  printf '%s\\n' '  amd_umc/umc_cas_cmd.rd/' '  amd_umc/umc_cas_cmd.wr/'\n"
         "  exit 0\n"
         "fi\n"
@@ -395,7 +432,7 @@ def test_pc_pmu_prints_the_same_lines(tmp_path):
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["HOME"] = str(tmp_path / "home")
     proc = subprocess.run(
-        ["sh", str(embedded_dir() / "pc_pmu.sh"), "-o", str(out)],
+        ["sh", str(embedded_dir() / "ddr_pmu.sh"), "-o", str(out)],
         capture_output=True,
         text=True,
         env=env,
@@ -406,6 +443,7 @@ def test_pc_pmu_prints_the_same_lines(tmp_path):
     write_bw = round(1_024_027 * 64 / float(elapsed) / 1e6, 4)
     plain = "\n".join([
         f"count window  {elapsed} s",
+        "count size  64 B",
         "",
         "DDR read  5602648 times",
         f"5602648 × 64 B / {elapsed} s = {read_bw:.4f} MB/s",
@@ -418,13 +456,13 @@ def test_pc_pmu_prints_the_same_lines(tmp_path):
     assert "\033[35m" not in out.read_text(encoding="utf-8")
 
 
-def test_pc_pmu_probe_matches_collect(capsys):
+def test_ddr_pmu_probe_matches_collect(capsys):
     import shutil
     import subprocess
 
     if shutil.which("perf") is None:
         pytest.skip("perf is not installed")
-    proc = subprocess.run(["sh", str(embedded_dir() / "pc_pmu.sh"), "--probe"], capture_output=True, text=True)
+    proc = subprocess.run(["sh", str(embedded_dir() / "ddr_pmu.sh"), "--probe"], capture_output=True, text=True)
     if proc.returncode != 0:
         pytest.skip(proc.stderr.strip())
     rc = cli_main(["collect", "--probe"])
@@ -433,16 +471,21 @@ def test_pc_pmu_probe_matches_collect(capsys):
     shell_events = next(line for line in proc.stdout.splitlines() if line.startswith("events="))
     cli_events = next(line for line in printed.splitlines() if line.startswith("events="))
     assert shell_events == cli_events
+    shell_bytes = next(line for line in proc.stdout.splitlines() if line.startswith("bytes="))
+    cli_bytes = next(line for line in printed.splitlines() if line.startswith("bytes="))
+    assert shell_bytes == cli_bytes
 
 
 def test_embedded_script_does_not_call_buseval():
-    script = (embedded_dir() / "pc_pmu.sh").read_text(encoding="utf-8")
+    script = (embedded_dir() / "ddr_pmu.sh").read_text(encoding="utf-8")
     assert "python3 -m buseval" not in script
     assert "python3 -c" not in script
     assert "perf list" in script
     assert "amd_uncore" in script
     assert "cas_count_read" in script
     assert "sudo -n true" in script
+    assert ".config/buseval" not in script
+    assert "64 B" not in script
     assert "cache-misses" not in script
 
 
@@ -459,7 +502,8 @@ def test_collect_prints_a_panel_without_a_required_file(tmp_path, capsys):
     assert "DDR read" in printed
     saved = json.loads(out.read_text(encoding="utf-8"))
     assert saved["source"] == "ddr"
-    assert saved["items"][0]["read_bw_mbps"] == pytest.approx(5_602_648 * 64 / 1.003544283 / 1e6)
+    assert saved["count_bytes"] is None
+    assert saved["items"][0]["read_bw_mbps"] is None
 
 
 def test_compare_ddr_aggregate_and_master_item():

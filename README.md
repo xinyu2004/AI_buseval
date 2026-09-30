@@ -2,30 +2,21 @@
 
 # buseval — SoC Bandwidth Evaluation Tool
 
-Settle the DDR choice while the board can still change. When silicon measurements come back, check the estimate against them.
+At approval, choose the SoC and the DDR from the functions. After engineering samples return, whole-machine read and write totals check the deviation between the summed estimate and the measurement.
 
 ## Why
 
-Bus width, DRAM speed, and how many devices sit on the board are locked in at layout. Too little bandwidth shows up as dropped frames and another spin of the board. Too much is paid for on every unit that ships. buseval is where that choice is made while the design is still open, and where it is checked again once the chip can be measured.
+Approval starts by fixing the functions. Once the functions are fixed, there is a basis for the SoC, and for the DDR capacity on the board. That is the first selection.
 
-## Overall Goal
+After the first selection, the same functions go back into the tool for repeated simulation. Change the SoC variant, change the DDR supplier, compare performance and price for each pair, and keep the pair with the best performance for the price.
 
-1. **Before layout** — Describe the scene: cameras, DBC, bitrates, TOPS. The engine adds up read and write demand, sets it against the DDR this board can deliver, and shows which blocks consume it.
-2. **On the bench** — Read the same bandwidth back from the chip.
-3. **After measurement** — Put the two figures side by side, see where the model drifted, and keep the memory parts on the configuration that is actually enough.
+Purchasing places the chosen variant and the chosen supplier on the BOM. Finance books the SoC and the DDR as cost per unit. Another variant is another chip cost; another supplier is another unit price for the same capacity. The simulations are how those combinations are compared.
 
-## Phase 1 (frozen)
-
-Early prediction, from the command line and the canvas. Collection and comparison stay on the roadmap.
-
-- 14 built-in estimators
-- Entries: SoC DDR topology (empty canvas, a common SoC, or a private SoC), CAN health, GMSL link
-- 7 common SoCs, a sample DBC, and a full-menu YAML template
-- Report: top contributors, read and write demand, R-util / W-util / occupancy on one green-yellow-red scale. The verdict follows occupancy. Assumptions appear only when something is flagged
-- Canvas: drag modules, connect `source`, evaluate in-process. The DDR card shows the occupancy percent in green, yellow, or red
-- `lint` for missing items and contradictions
+What the engineering samples check is the machine total. A close total can still hide one block estimated high and another low. CAN load and the GMSL link are part selection after approval. They are not part of this SoC and DDR choice, and can be checked by a hardware collection.
 
 ## Quick Start
+
+Step 1 is approval: choose the SoC and the DDR capacity from the functions, then simulate variants and suppliers. CAN and GMSL are part selection after approval.
 
 ```bash
 pip install -e .
@@ -39,18 +30,15 @@ buseval predict --soc tda4vh
 ```bash
 # 2. CAN-FD health report (2 Mbps)
 buseval predict --dbc examples/sample.dbc --can-bitrate 2000
-# 2b. Multi-CAN: route different DBCs to specific CAN controllers
-buseval predict --soc tda4vh \
-    --can-dbc CAN0=examples/sample.dbc \
-    --can-dbc CAN2=examples/sample_heavy.dbc
+# Several buses: route each DBC to a CAN controller
+buseval predict --soc tda4vh --can-dbc CAN0=examples/sample.dbc --can-dbc CAN2=examples/sample_heavy.dbc
 ```
 
 ![CAN Health Report](./gallery/CAN.png)
 
 ```bash
-# 3. GMSL link bandwidth (independent tool, single link)
+# 3. GMSL link bandwidth
 buseval predict --GMSL width=1920 height=1080 fps=30 bpp=12
-# 3b. GMSL multi-link (YAML)
 buseval predict --GMSL examples/gmsl_links.yaml
 ```
 
@@ -59,23 +47,17 @@ buseval predict --GMSL examples/gmsl_links.yaml
 ```bash
 # 4. Configure your own YAML
 cp examples/full_menu.yaml my.yaml
-buseval lint my.yaml
 buseval predict -t my.yaml
 ```
 
 ## GUI
-
-The CLI and the GUI do not call each other. They share topology YAML. `buseval predict -t` is the Phase 1 command.
 
 ```bash
 pip install -e '.[gui]'
 buseval gui
 ```
 
-Startup asks what to evaluate.
-
-- **SoC DDR topology** — an empty canvas, a common SoC, or a private SoC file. The canvas has a module palette. Drag modules, draw `source` edges, double-click a node to edit parameters, double-click the DDR card to edit the channel. The DDR strip only shows status. Evaluate runs in the GUI process. A module's color deepens with its share of read+write bandwidth, and the DDR card shows occupancy in green, yellow, or red. The saved YAML still works with `buseval predict -t`.
-- **CAN health** and **GMSL link** open their own pages from that dialog and from the File menu. They are not nodes on the topology canvas.
+Startup asks which page to open. SoC DDR is the canvas: drag modules, connect them, double-click to edit, then evaluate. The DDR card shows occupancy in green, yellow, or red. CAN and GMSL are separate pages.
 
 GMSL is one page: up to four cameras on one coax, the link formula, and a tier. The CLI panel above is the same calculation.
 
@@ -83,9 +65,11 @@ GMSL is one page: up to four cameras on one coax, the link formula, and a tier. 
 
 ## Measurement
 
-On a PC, `buseval collect` prints DDR read and write rates. `-o` also writes `meas.json`. There is no platform flag. The counters come from a scan of `perf list` and `/sys/bus/event_source/devices`, keeping a PMU that has both a read burst and a write burst. An aggregate pair is used alone; per-channel beats are summed only when no aggregate exists. CPU cache misses are not used. The total includes DMA and is not split per camera or NIC. Loading `amd_uncore` asks first; counting is system-wide and asks for an administrator password. A missing counter exits instead of inventing a number.
+`buseval collect` reads the memory controller's read and write counts and prints whole-machine DDR bandwidth. `-o` also writes `meas.json`. There is no platform flag. The counters come from a scan of `perf list` and `/sys/bus/event_source/devices`, keeping a PMU that has both a read burst and a write burst. An aggregate pair is used alone; per-channel beats are summed only when no aggregate exists. CPU cache misses are not used. The total includes DMA and is not split per camera or NIC.
 
-`src/buseval/embedded/` is what you copy onto a board. `pc_pmu.sh` prints the same count window, DDR read, and DDR write lines, keeping perf's full elapsed time. `-o` saves that text without color. It does not call buseval. `buseval collect --from` reads that text. CAN and GMSL are not part of this command. SoC DDR (TDA4VH first) uses that chip's DDR counter when it is already a `perf` event or a sysfs file. C is only for a counter that is neither.
+Bytes per count come from this machine: the event's scale, a perf metric expression, or the MB/s this `perf stat` already printed. If none of those exist, the panel has no `count size` and no MB/s. When this command will ask for the administrator password, it prints the risk notice first. A live sudo ticket skips both the notice and the password. Loading `amd_uncore` on AMD, when the counters are not registered yet, asks the same way. A missing counter exits instead of inventing a number.
+
+`src/buseval/embedded/ddr_pmu.sh` is the copy that runs on a board. It does not call buseval. It prints the same count window, count size, DDR read, and DDR write lines, keeping perf's full elapsed time. `-o` saves that text without color. `buseval collect --from` reads that text and uses the byte size on the count size line.
 
 ```bash
 buseval collect
@@ -93,86 +77,26 @@ buseval collect -o meas.json
 buseval compare -t my.yaml -m meas.json
 ```
 
-The GUI imports that same file from Measure → Import. Each front end compares on its own.
+![DDR collect](./gallery/collect.png)
+
+Compare sets the measured machine total against the sum of the prediction. The GUI imports the same `meas.json` from Measure → Import.
 
 ## Roadmap
 
-- **Phase 1, frozen** — CLI and GUI for SoC DDR, CAN health, and GMSL. DDR occupancy is green, yellow, or red
-- **Stage A** — `buseval collect` on the PC, using `perf`. CAN and GMSL are not in this command
-- **Stage B** — SoC DDR counters (TDA4VH first), via `perf` or sysfs. C only when the counter is neither
-- **Stage C** — On-board CAN / GMSL, which need that hardware, still `meas.json`
-- Coefficient self-calibration stays later
+- **Stage A, in place** — `buseval collect` on this machine reads whole-machine DDR.
+- **Stage B** — Copy `ddr_pmu.sh` onto the SoC. The result is still the machine total. It has not been run on a board yet. C is only for a counter that is neither perf nor sysfs.
 
 ## Supported Estimators
 
-CAN (DBC) / CAN (load) / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH (NAND / eMMC / UFS) / ISP / NPU / GPU / Display / VENC (H.264/H.265/AV1) / VDEC
+CAN / SPI / MIPI CSI / MIPI DSI / USB / ETH / FLASH / ISP / NPU / GPU / Display / VENC / VDEC
 
-MIPI CSI / DSI support a `count` parameter for multi-stream multiplexing on one port
-(MIPI virtual channels VC0-3, or deserializer aggregation). `count: 4` models 4 cameras
-on one CSI port for worst-case bandwidth evaluation; lane capacity is checked against
-the aggregate. Defaults to 1 (backward compatible).
-
-## Pipeline Wiring (`source`) & ISP Stages
-
-Pipelines (ISP / NPU / VENC / VDEC / Display) can declare an optional `source`
-field naming a master (e.g. `CSI1`) **or another pipeline** (e.g. `ISP0`) whose
-output they consume. This wires the data flow explicitly (pipeline-to-pipeline
-chaining supported via topological sort; cycles are rejected).
-
-- **master source** (e.g. `CSI0`): the pipeline inherits the master's image
-  dimensions (width/height/fps/bpp/count) and computes its own frame stream.
-- **pipeline source** (e.g. `ISP0`): the pipeline receives the upstream
-  pipeline's **output bandwidth** (write_bw) as its input — useful for
-  `ISP0→NPU0` (NPU reads ISP's YUV output), `ISP0→VENC0` (encode ISP output),
-  `ISP0→DISP0` (low-latency viewfinder path).
-- IPs that read directly from DDR (no source) leave `source: null` and put
-  width/height/fps/bpp directly in `params`.
-
-```yaml
-pipelines:
-  - name: ISP0
-    type: isp
-    source: CSI1              # master → pipeline (inherit CSI1's dimensions)
-    mode: serial              # serial = max of stages; parallel = sum
-    stages:                   # fully customisable — name & factors are arbitrary
-      - {name: bayer,     read_factor: 1.0, write_factor: 1.0}
-      - {name: demosaic,  read_factor: 1.5, write_factor: 2.0}
-      - {name: yuv_scale, read_factor: 2.0, write_factor: 1.0}
-      # vendor-specific stages — any name, any factor:
-      - {name: custom_NR,  read_factor: 1.8, write_factor: 1.2}
-      - {name: WDR,        read_factor: 2.5, write_factor: 1.5}
-    # each stage's DDR traffic = frame_stream × factor
-  - name: VENC0
-    type: venc                # encode ISP output for recording; codec = h264|h265|av1
-    source: ISP0              # p2p: VENC reads ISP0's YUV output
-    params: {width: 1280, height: 720, fps: 60, bpp: 16, codec: h265}
-  - name: VDEC0
-    type: vdec                # playback decoder (independent; no source)
-    params: {width: 1920, height: 1080, fps: 30, bpp: 16, codec: h265}
-  - name: NPU0
-    type: npu
-    source: [CSI0, ISP0]      # multi-source: CSI0 raw-domain (4-cam) + ISP0 YUV output (p2p)
-                              #   each source uses its NATIVE fps (no sync/cap),
-                              #   input is the SUM of per-source MB/s (not fps),
-                              #   weight + activation are computed once (shared model)
-    params: {params_mbytes: 80, activation_mbytes: 40, inference_fps: 30, tops_peak: 8}
-  - name: DISP0
-    type: display
-    source: ISP0              # p2p: Display reads ISP0's YUV (low-latency path)
-```
-
-All SoC presets ship with a default wiring (CSI1→ISP0→{NPU0, VENC0, DISP0}; NPU0
-also sources CSI0) as a starting point; edit the YAML to match your board.
-
-### Codec compression ratios (VENC / VDEC)
-
-`codec` selects a default compression ratio (configurable in
-`_coefficients.yaml`): h264=30, h265=50, av1=70. Override per instance with
-`params.compression_ratio: 40`.
+Cameras sharing one CSI or DSI port add up through `count`. Wiring, ISP stages, and compression ratios are in [design.md](design.md).
 
 ## Common SoCs
 
 TI TDA4VH / NVIDIA Orin NX / Horizon J5 / Qualcomm SA8155 / Rockchip RK3588 / Allwinner T527 / NXP S32G
+
+DDR rate and width in the presets come from public specifications.
 
 ## Documentation
 
