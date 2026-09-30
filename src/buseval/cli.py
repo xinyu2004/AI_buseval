@@ -287,31 +287,35 @@ def cmd_compare(args) -> int:
 
 
 def cmd_collect(args) -> int:
-    from .collect.runner import probe_platform, run_collect
+    import json
 
+    from rich.panel import Panel
+
+    from .collect.perf_text import panel_lines
+    from .collect.runner import collect_machine, measurement_from_text, probe_text
+
+    console = Console(highlight=False, no_color=args.no_color)
     try:
         if args.probe:
-            print(probe_platform(args.platform))
+            print(probe_text())
             return 0
-        if not args.output:
-            print("collect requires -o meas.json", file=sys.stderr)
-            return 2
-        extra = []
-        if args.pattern:
-            extra += ["--pattern", args.pattern]
-        if args.bytes is not None:
-            extra += ["--bytes", str(args.bytes)]
-        if args.threads is not None:
-            extra += ["--threads", str(args.threads)]
-        if args.duration is not None:
-            extra += ["--duration", str(args.duration)]
-        if args.name:
-            extra += ["--name", args.name]
-        run_collect(args.platform, args.output, extra)
+        if args.perf_text:
+            text = Path(args.perf_text).read_text(encoding="utf-8", errors="replace")
+            body = measurement_from_text(text, name=args.name or "CPU0")
+        else:
+            body = collect_machine(
+                duration=1.0 if args.duration is None else args.duration,
+                name=args.name or "CPU0",
+            )
     except (OSError, ValueError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    print(args.output)
+    except KeyboardInterrupt:
+        print("cancelled", file=sys.stderr)
+        return 130
+    console.print(Panel("\n".join(panel_lines(body)), title="buseval collect", border_style="cyan"))
+    if args.output:
+        Path(args.output).write_text(json.dumps(body, indent=2), encoding="utf-8")
     return 0
 
 
@@ -387,15 +391,13 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("-m", "--measurement", required=True)
     cp.set_defaults(func=cmd_compare)
 
-    col = sub.add_parser("collect", help="Run a platform collector and write meas.json.")
-    col.add_argument("--platform", default="arm_pc")
-    col.add_argument("-o", "--output")
-    col.add_argument("--probe", action="store_true")
-    col.add_argument("--pattern", choices=["read", "write", "copy"])
-    col.add_argument("--bytes", type=int)
-    col.add_argument("--threads", type=int)
+    col = sub.add_parser("collect", help="Measure this PC with perf and print the result.")
+    col.add_argument("-o", "--output", help="Also write meas.json. The panel is printed either way.")
+    col.add_argument("--from", dest="perf_text", help="Parse perf stat text copied from a board instead of running perf.")
+    col.add_argument("--probe", action="store_true", help="Show the CPU arch and perf events. Do not run a workload.")
     col.add_argument("--duration", type=float)
     col.add_argument("--name")
+    col.add_argument("--no-color", action="store_true", help="Disable color output.")
     col.set_defaults(func=cmd_collect)
 
     gui = sub.add_parser("gui", help="Open the topology canvas.")
@@ -405,6 +407,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .complete import install_shell_completion
+
+    install_shell_completion()
     if argv is None:
         argv = sys.argv[1:]
     if argv and argv[0] == "ui":

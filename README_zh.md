@@ -83,10 +83,13 @@ GMSL 是一页：一根同轴上最多四路摄像头、链路公式，以及等
 
 ## 实测
 
-采集器按平台选择，产出都是 `meas.json`。基础 ARM PC 用 `src/buseval/collectors/arm_pmu.sh` 调 `perf`。板上能用 shell 读计数器就用 shell，不必先写成 C。
+在 PC 上，`buseval collect` 打出 DDR 读写速率。加上 `-o` 才另写 `meas.json`。这条命令没有平台参数。计数器来自对 `perf list` 和 `/sys/bus/event_source/devices` 的扫描：同时有读突发和写突发的 PMU 才留下。已有合计计数时只用那一对；没有合计时才把同一设备上的通道相加。不用 CPU cache miss。总数包含 DMA，拆不开某一路摄像头或网卡。加载 `amd_uncore` 前会先说明风险；统计是全机的，所以会要管理员密码。计数器不存在就退出，不编一个带宽数字。
+
+`src/buseval/embedded/` 是拷到板子上的那一包。`pc_pmu.sh` 打出同一套 count window、DDR read、DDR write，时间保持 perf 的全部小数。`-o` 保存这段文字且不带颜色。它不调用 buseval。`buseval collect --from` 读的就是这段文字。CAN 和 GMSL 不在这条命令里。SoC DDR（先 TDA4VH）在该芯片的 DDR 计数器已经是 `perf` 事件或 sysfs 文件时直接读。两者都没有时才写 C。
 
 ```bash
-buseval collect --platform arm_pc -o meas.json
+buseval collect
+buseval collect -o meas.json
 buseval compare -t my.yaml -m meas.json
 ```
 
@@ -95,9 +98,9 @@ GUI 用「实测 → 导入实测」读同一份文件。对比在各自进程�
 ## 路线图
 
 - **Phase 1（已冻结）**：命令行和界面都覆盖 SoC DDR、CAN 健康报告、GMSL 链路。DDR 占用率显示绿、黄、红
-- **阶段 A**：基础 ARM PC 上用 `perf` 采集 CPU 内存带宽，和预测对比
-- **阶段 B**：SoC DDR 计数器（先 TDA4VH），能用 shell 就不写 C
-- **阶段 C**：板端 CAN / GMSL，仍写 `meas.json`
+- **阶段 A**：PC 上 `buseval collect` 调 `perf`。CAN 和 GMSL 不在这条命令里
+- **阶段 B**：SoC DDR 计数器（先 TDA4VH），先用 `perf` 或 sysfs。两者都没有才写 C
+- **阶段 C**：板端 CAN / GMSL，需要对应硬件，仍写 `meas.json`
 - 系数自校准仍在后面，不在本轮
 
 ## 支持的估算器

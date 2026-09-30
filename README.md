@@ -83,10 +83,13 @@ GMSL is one page: up to four cameras on one coax, the link formula, and a tier. 
 
 ## Measurement
 
-Every platform adapter writes the same `meas.json`. On a basic ARM PC, `src/buseval/collectors/arm_pmu.sh` runs `perf`. A board uses a shell script when the counters are already a command or sysfs file. C is only for counters a shell cannot read.
+On a PC, `buseval collect` prints DDR read and write rates. `-o` also writes `meas.json`. There is no platform flag. The counters come from a scan of `perf list` and `/sys/bus/event_source/devices`, keeping a PMU that has both a read burst and a write burst. An aggregate pair is used alone; per-channel beats are summed only when no aggregate exists. CPU cache misses are not used. The total includes DMA and is not split per camera or NIC. Loading `amd_uncore` asks first; counting is system-wide and asks for an administrator password. A missing counter exits instead of inventing a number.
+
+`src/buseval/embedded/` is what you copy onto a board. `pc_pmu.sh` prints the same count window, DDR read, and DDR write lines, keeping perf's full elapsed time. `-o` saves that text without color. It does not call buseval. `buseval collect --from` reads that text. CAN and GMSL are not part of this command. SoC DDR (TDA4VH first) uses that chip's DDR counter when it is already a `perf` event or a sysfs file. C is only for a counter that is neither.
 
 ```bash
-buseval collect --platform arm_pc -o meas.json
+buseval collect
+buseval collect -o meas.json
 buseval compare -t my.yaml -m meas.json
 ```
 
@@ -95,9 +98,9 @@ The GUI imports that same file from Measure → Import. Each front end compares 
 ## Roadmap
 
 - **Phase 1, frozen** — CLI and GUI for SoC DDR, CAN health, and GMSL. DDR occupancy is green, yellow, or red
-- **Stage A** — ARM PC `perf` collection of CPU memory bandwidth, compared with the prediction
-- **Stage B** — SoC DDR counters (TDA4VH first), shell when the platform already exposes them
-- **Stage C** — On-board CAN / GMSL, still `meas.json`
+- **Stage A** — `buseval collect` on the PC, using `perf`. CAN and GMSL are not in this command
+- **Stage B** — SoC DDR counters (TDA4VH first), via `perf` or sysfs. C only when the counter is neither
+- **Stage C** — On-board CAN / GMSL, which need that hardware, still `meas.json`
 - Coefficient self-calibration stays later
 
 ## Supported Estimators

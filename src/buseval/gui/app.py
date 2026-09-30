@@ -889,12 +889,15 @@ class MainWindow(QMainWindow):
         GmslDialog(self).exec()
 
     def collect_local(self):
-        from ..collect.runner import run_collect
+        import json
+
+        from ..collect.runner import collect_machine
         path, _ = QFileDialog.getSaveFileName(self, t("save_meas"), "meas.json", "JSON (*.json)")
         if not path:
             return
         try:
-            run_collect("arm_pc", path)
+            body = collect_machine()
+            Path(path).write_text(json.dumps(body, indent=2), encoding="utf-8")
         except Exception as exc:
             self.statusBar().showMessage(str(exc))
             return

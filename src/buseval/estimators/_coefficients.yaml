@@ -88,7 +88,7 @@ gmsl:
     gmsl2_6g: 6000              # GMSL2 6 Gbps mode
     gmsl3: 12000                # GMSL3 PAM4, FEC is applied in the calculator
 
-# Cache line for the arm_pc perf parser. There is no CPU canvas module.
+# Cache line for the PC perf parser. There is no CPU canvas module.
 cpu:
   cache_line_bytes: 64
 

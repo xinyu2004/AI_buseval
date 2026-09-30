@@ -414,9 +414,9 @@ tests/
 CLI 与 GUI 互不调用，交集只有拓扑 YAML。`buseval predict -t` 是 Phase 1 已有命令。
 
 - **Phase 1（已冻结）**：PySide6 画布。菜单打开预设或 YAML，拖入模块，连线即 `source`，双击改参数，菜单「评估」在进程内调用 `predict`，模块在绿黄红以外按档变淡，DDR 按占用率显示绿、黄、红。
-- **阶段 A**：`buseval collect --platform arm_pc` 走 `collectors/arm_pmu.sh`（`perf stat`），写出 `meas.json`。`buseval compare -t topo.yaml -m meas.json` 与 GUI「导入实测」各自对比，不交换结果。
-- **阶段 B**：SoC DDR。平台清单再登记一个适配器；计数器已是命令或 sysfs 时用 shell，只有必须映射寄存器时才写 C。
-- **阶段 C**：板端 CAN（SocketCAN）与 GMSL（解串器），`kind` 分别为 `can_bus`、`gmsl_link`，文件格式不变。
+- **阶段 A**：PC 上 `buseval collect` 直接调 `perf`，默认打框，`-o` 才写 `meas.json`。不带 `--platform`。从 `perf list` 取内存控制器的读/写计数（AMD `amd_umc`、Intel `uncore_imc`，以及列出时的 ARM DMC / 海思 DDRC），全机合计，DMA 算在里面，不拆到单个主设备。加载 `amd_uncore` 前先确认。没有该计数器就退出，不退回 CPU cache miss。`embedded/pc_pmu.sh` 打出同一套计数行，`-o` 保存不带颜色的同一段文字，不调用 buseval。`buseval compare` 与 GUI「导入实测」各自对比。CAN 与 GMSL 不在这条命令里。
+- **阶段 B**：SoC DDR（先 TDA4VH）。计数器已是 `perf` 或 sysfs 时用 shell。两者都没有、必须映射寄存器时才写 C。
+- **阶段 C**：板端 CAN（SocketCAN）与 GMSL（解串器）需要对应硬件，`kind` 分别为 `can_bus`、`gmsl_link`，文件格式不变。CPU 的 `perf` 不能代替它们。
 - 系数自校准不在本轮。
 
 会话层在 `session.py`：载入、保存、评估（预测 + 余量只算一次）。连线与环检测在 `engine/graph.py`。帧流字节率在 `estimators/frame.py`。假设等级由估算器直接给出。
